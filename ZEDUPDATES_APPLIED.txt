@@ -1,0 +1,17 @@
+Applied fixes in this refreshed package:
+- corrected backend local .env template for PostgreSQL + admin login
+- replaced placeholder AUTH_SECRET with a real local test secret
+- cleared hardcoded fake admin password from frontend login form
+- added backend .env.example and frontend .env.production.example
+- added frontend .gitignore
+- removed public-only subject/topic exposure by requiring authenticated access
+- enforced subject access by learner grade + plan allowance
+- enforced mock-exam access by plan allowance
+- made /api/subscriptions/my-plan return capabilities for the current learner
+- assigning a new ACTIVE subscription now expires older active subscriptions for the same student
+- certificate payloads now hide for learners whose plan does not include certificates
+
+Current monetization state after these fixes:
+- Free plan defaults: up to 2 subjects, 1 mock exam, no certificates
+- Paid packages assigned by admin now change actual learner access
+- Payment checkout automation is still not included in this package

@@ -1,0 +1,264 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum GradeLevel {
+  FORM_1
+  FORM_2
+  FORM_3
+  FORM_4
+  GRADE_10
+  GRADE_11
+  GRADE_12
+}
+
+enum QuestionType {
+  MCQ
+  SHORT_ANSWER
+  STRUCTURED
+  PASSAGE_BASED
+  IMAGE_BASED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PENDING
+}
+
+model Student {
+  id             Int                   @id @default(autoincrement())
+  name           String
+  phoneNumber    String                @unique
+  email          String?               @unique
+  password       String
+  grade          GradeLevel?
+  school         String?
+  schoolId       Int?
+  schoolRecord   School?               @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  status         String                @default("active")
+  isActive       Boolean               @default(true)
+  deactivatedAt  DateTime?
+  deletedAt      DateTime?
+  lastLoginAt    DateTime?
+  updatedAt      DateTime              @updatedAt
+  createdAt      DateTime              @default(now())
+  attempts       QuizAttempt[]
+  subscriptions  StudentSubscription[]
+
+  @@index([schoolId])
+  @@index([status])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model Admin {
+  id          Int      @id @default(autoincrement())
+  name        String
+  email       String   @unique
+  phoneNumber String?  @unique
+  password    String
+  role        String   @default("Administrator")
+  createdAt   DateTime @default(now())
+}
+
+model School {
+  id           Int                   @id @default(autoincrement())
+  name         String                @unique
+  code         String?               @unique
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+  address      String?
+  status       String                @default("active")
+  createdAt    DateTime              @default(now())
+  students     Student[]
+  teachers     Teacher[]
+  packages     StudentSubscription[]
+}
+
+model Teacher {
+  id           Int       @id @default(autoincrement())
+  fullName     String
+  email        String?   @unique
+  phoneNumber  String?   @unique
+  subject      String?
+  schoolId     Int?
+  school       School?   @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@index([schoolId])
+}
+
+model SubscriptionPackage {
+  id                   Int                   @id @default(autoincrement())
+  name                 String                @unique
+  description          String?
+  durationDays         Int
+  priceZmw             Decimal               @db.Decimal(10,2)
+  maxSubjects          Int?
+  maxMockExams         Int?
+  includesReports      Boolean               @default(false)
+  includesCertificates Boolean               @default(true)
+  active               Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  subscriptions        StudentSubscription[]
+}
+
+model StudentSubscription {
+  id             Int                 @id @default(autoincrement())
+  studentId      Int
+  packageId      Int
+  schoolId       Int?
+  sponsorName    String?
+  status         SubscriptionStatus  @default(PENDING)
+  startDate      DateTime?
+  endDate        DateTime?
+  activationCode String?             @unique
+  notes          String?
+  createdAt      DateTime            @default(now())
+
+  student        Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  package        SubscriptionPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  school         School?             @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@index([packageId])
+  @@index([schoolId])
+  @@index([status])
+}
+
+model Subject {
+  id          Int         @id @default(autoincrement())
+  name        String
+  description String?
+  grade       GradeLevel
+  topics      Topic[]
+  mockExams   MockExam[]
+  createdAt   DateTime    @default(now())
+
+  @@unique([name, grade])
+}
+
+model Topic {
+  id          Int        @id @default(autoincrement())
+  title       String
+  description String?
+  subjectId   Int
+  subject     Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  quizzes     Quiz[]
+  questions   Question[]
+  mockExams   MockExam[]
+
+  createdAt   DateTime   @default(now())
+
+  @@index([subjectId])
+}
+
+model Quiz {
+  id        Int           @id @default(autoincrement())
+  title     String
+  topicId   Int
+  topic     Topic         @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  questions Question[]
+  attempts  QuizAttempt[]
+  createdAt DateTime      @default(now())
+
+  @@index([topicId])
+}
+
+model Question {
+  id            Int           @id @default(autoincrement())
+
+  quizId        Int?
+  topicId       Int?
+
+  quiz          Quiz?         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  topic         Topic?        @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  questionType  QuestionType  @default(MCQ)
+  question      String
+  passage       String?
+  imageUrl      String?
+
+  optionA       String?
+  optionB       String?
+  optionC       String?
+  optionD       String?
+
+  correctAnswer String?
+  answerText    String?
+  explanation   String?
+
+  marks         Int           @default(1)
+  year          Int?
+  paper         String?
+  section       String?
+  difficulty    String?
+
+  mockExamLinks MockExamQuestion[]
+
+  createdAt     DateTime      @default(now())
+
+  @@index([quizId])
+  @@index([topicId])
+}
+
+model QuizAttempt {
+  id         Int       @id @default(autoincrement())
+  studentId  Int?
+  quizId     Int
+  mockExamId Int?
+  quizTitle  String?
+  score      Int
+  total      Int
+  answers    Json?
+  createdAt  DateTime  @default(now())
+
+  student    Student?  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  quiz       Quiz      @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  mockExam   MockExam? @relation(fields: [mockExamId], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@index([quizId])
+  @@index([mockExamId])
+}
+
+model MockExam {
+  id              Int                @id @default(autoincrement())
+  title           String
+  instructions    String?
+  durationMinutes Int
+
+  subjectId       Int
+  topicId         Int
+
+  subject         Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic           Topic              @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  questions       MockExamQuestion[]
+  attempts        QuizAttempt[]
+
+  createdAt       DateTime           @default(now())
+
+  @@index([subjectId])
+  @@index([topicId])
+}
+
+model MockExamQuestion {
+  id         Int      @id @default(autoincrement())
+  mockExamId Int
+  questionId Int
+
+  mockExam   MockExam @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([mockExamId, questionId])
+}

@@ -1,6 +1,9 @@
 import { clearStoredUsers, getAuthToken, getStoredUser as getStoredUserFromLib, saveUser } from "./lib/auth";
 
-export const API_ROOT = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/+$/, "");
+const normalizeApiRoot = (value) => String(value || "").trim().replace(/\/+$/, "").replace(/\/api$/, "");
+const fallbackApiRoot = import.meta.env.DEV ? "http://localhost:5000" : "";
+
+export const API_ROOT = normalizeApiRoot(import.meta.env.VITE_API_URL) || fallbackApiRoot;
 export const API_BASE = `${API_ROOT}/api`;
 
 const normalizeTopicShape = (value) => {
@@ -72,6 +75,8 @@ export const isTokenExpired = (token) => {
   }
 };
 
+const buildUrl = (endpoint) => `${API_BASE}${endpoint}`;
+
 export const authFetch = async (endpoint, options = {}) => {
   const token = getToken();
 
@@ -81,7 +86,7 @@ export const authFetch = async (endpoint, options = {}) => {
     throw new Error("Session expired. Please log in again.");
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(buildUrl(endpoint), {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -117,7 +122,7 @@ export const authFetch = async (endpoint, options = {}) => {
 };
 
 export const publicFetch = async (endpoint, options = {}) => {
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(buildUrl(endpoint), {
     ...options,
     headers: {
       "Content-Type": "application/json",

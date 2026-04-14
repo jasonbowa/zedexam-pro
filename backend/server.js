@@ -21,12 +21,34 @@ const teachersRoutes = require('./src/routes/teachers.routes');
 const subscriptionsRoutes = require('./src/routes/subscriptions.routes');
 
 const app = express();
-const allowedOrigins = new Set(env.FRONTEND_URLS);
+const allowedOrigins = env.FRONTEND_URLS.map((origin) => String(origin || '').trim().replace(/\/+$/, '')).filter(Boolean);
+
+function toOriginRegex(pattern) {
+  const escapedSegments = String(pattern || '')
+    .split('*')
+    .map((segment) => segment.replace(/[|\{}()[\]^$+?.]/g, '\\$&'));
+
+  return new RegExp(`^${escapedSegments.join('.*')}$`);
+}
+
+function isAllowedOrigin(origin) {
+  const normalizedOrigin = String(origin || '').trim().replace(/\/+$/, '');
+  if (!normalizedOrigin) return true;
+
+  return allowedOrigins.some((pattern) => {
+    const normalizedPattern = String(pattern || '').trim().replace(/\/+$/, '');
+    if (!normalizedPattern) return false;
+    if (normalizedPattern === normalizedOrigin) return true;
+    if (!normalizedPattern.includes('*')) return false;
+
+    return toOriginRegex(normalizedPattern).test(normalizedOrigin);
+  });
+}
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+      if (isAllowedOrigin(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,

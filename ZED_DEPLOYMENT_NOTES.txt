@@ -1,0 +1,17 @@
+ZedExam Pro deployment fixes applied
+
+Frontend
+- Removed localhost fallback from runtime API helpers.
+- Added Vercel SPA routing file: frontend/vercel.json
+- Removed missing vite.svg favicon reference.
+- Added frontend/.env.example and frontend/.env.production.example
+
+Backend
+- Added wildcard-aware CORS support (e.g. https://*.vercel.app)
+- Made production env defaults safer in backend/src/config/env.js
+- Sanitized backend/.env and backend/.env.example
+- Added backend/.env.render.example
+
+Use these platform variables:
+- Vercel: VITE_API_URL=https://zedexam-pro-backend-jason.onrender.com
+- Render: FRONTEND_URL=https://zedexam-pro.vercel.app,https://*.vercel.app

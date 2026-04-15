@@ -1,7 +1,13 @@
 import { clearStoredUsers, getAuthToken, getStoredUser as getStoredUserFromLib, saveUser } from "./lib/auth";
 
-export const API_ROOT = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(/\/+$/, "");
-export const API_BASE = `${API_ROOT}/api`;
+const resolveApiRoot = () => {
+  const raw = String(import.meta.env.VITE_API_URL || "").trim();
+  if (!raw) return "";
+  return raw.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+};
+
+export const API_ROOT = resolveApiRoot();
+export const API_BASE = API_ROOT ? `${API_ROOT}/api` : "/api";
 
 const normalizeTopicShape = (value) => {
   if (Array.isArray(value)) {

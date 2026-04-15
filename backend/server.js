@@ -21,34 +21,27 @@ const teachersRoutes = require('./src/routes/teachers.routes');
 const subscriptionsRoutes = require('./src/routes/subscriptions.routes');
 
 const app = express();
-const allowedOrigins = env.FRONTEND_URLS.map((origin) => String(origin || '').trim().replace(/\/+$/, '')).filter(Boolean);
 
-function toOriginRegex(pattern) {
-  const escapedSegments = String(pattern || '')
-    .split('*')
-    .map((segment) => segment.replace(/[|\{}()[\]^$+?.]/g, '\\$&'));
-
-  return new RegExp(`^${escapedSegments.join('.*')}$`);
+function escapeRegex(value) {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
-function isAllowedOrigin(origin) {
-  const normalizedOrigin = String(origin || '').trim().replace(/\/+$/, '');
-  if (!normalizedOrigin) return true;
+function isAllowedOrigin(origin, allowedPatterns = []) {
+  if (!origin) return true;
 
-  return allowedOrigins.some((pattern) => {
-    const normalizedPattern = String(pattern || '').trim().replace(/\/+$/, '');
-    if (!normalizedPattern) return false;
-    if (normalizedPattern === normalizedOrigin) return true;
-    if (!normalizedPattern.includes('*')) return false;
+  return allowedPatterns.some((pattern) => {
+    if (pattern === origin) return true;
+    if (!pattern.includes('*')) return false;
 
-    return toOriginRegex(normalizedPattern).test(normalizedOrigin);
+    const regex = new RegExp(`^${escapeRegex(pattern).replace(/\*/g, '.*')}$`);
+    return regex.test(origin);
   });
 }
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (isAllowedOrigin(origin)) return callback(null, true);
+      if (isAllowedOrigin(origin, env.FRONTEND_URLS)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
@@ -79,6 +72,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/subjects', subjectsRoutes);
 app.use('/api/topics', topicsRoutes);
 app.use('/api/quizzes', quizzesRoutes);
@@ -86,7 +80,6 @@ app.use('/api/questions', questionsRoutes);
 app.use('/api/results', resultsRoutes);
 app.use('/api/mock-exams', mockExamsRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/schools', schoolsRoutes);
 app.use('/api/teachers', teachersRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
@@ -110,7 +103,7 @@ app.use((err, _req, res, _next) => {
 const server = app.listen(env.PORT, () => {
   console.log('====================================');
   console.log(`ZedExam Pro backend running on port ${env.PORT}`);
-  console.log(`Frontend URL: ${env.FRONTEND_URLS.join(', ')}`);
+  console.log(`Frontend URL: ${env.FRONTEND_URLS.join(', ') || 'not configured'}`);
   console.log(`Uploads folder: ${env.UPLOAD_DIR}`);
   console.log('Routes loaded:');
   console.log('- GET /');
@@ -131,8 +124,7 @@ const server = app.listen(env.PORT, () => {
 });
 
 async function shutdown(signal) {
-  console.log(`
-${signal} received. Closing ZedExam Pro backend...`);
+  console.log(`\n${signal} received. Closing ZedExam Pro backend...`);
 
   server.close(async () => {
     try {

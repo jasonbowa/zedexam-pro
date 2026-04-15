@@ -1,9 +1,0 @@
-Deployment fixes applied to this package:
-- frontend API helpers now use VITE_API_URL without falling back to localhost in production
-- frontend accepts VITE_API_URL with or without a trailing /api
-- removed missing vite.svg favicon reference that caused a 404 in production
-- added frontend/vercel.json SPA rewrite so direct route refreshes work on Vercel
-- added frontend/.env.example for local development
-- added backend/.env.render.example for Render deployment
-- backend CORS now supports wildcard origin patterns such as https://*.vercel.app
-- backend .env.example updated to show localhost + Vercel origin patterns

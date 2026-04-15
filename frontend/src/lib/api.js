@@ -1,8 +1,14 @@
 import axios from 'axios';
 import { getAuthToken } from './auth';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
-export const API = `${API_BASE_URL}/api`;
+const resolveApiBaseUrl = () => {
+  const raw = String(import.meta.env.VITE_API_URL || '').trim();
+  if (!raw) return '';
+  return raw.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+export const API = API_BASE_URL ? `${API_BASE_URL}/api` : '/api';
 
 export const api = axios.create({
   baseURL: API,

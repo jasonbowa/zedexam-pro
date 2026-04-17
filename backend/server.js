@@ -23,25 +23,49 @@ const subscriptionsRoutes = require('./src/routes/subscriptions.routes');
 const app = express();
 
 function escapeRegex(value) {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+  return String(value).replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
 }
 
 function isAllowedOrigin(origin, allowedPatterns = []) {
   if (!origin) return true;
 
   return allowedPatterns.some((pattern) => {
+    if (!pattern) return false;
     if (pattern === origin) return true;
-    if (!pattern.includes('*')) return false;
+    if (!String(pattern).includes('*')) return false;
 
     const regex = new RegExp(`^${escapeRegex(pattern).replace(/\*/g, '.*')}$`);
     return regex.test(origin);
   });
 }
 
+const envFrontendUrls = Array.isArray(env.FRONTEND_URLS)
+  ? env.FRONTEND_URLS
+  : typeof env.FRONTEND_URLS === 'string'
+  ? env.FRONTEND_URLS.split(',').map((item) => item.trim()).filter(Boolean)
+  : [];
+
+const allowedOrigins = [
+  'https://zedexam-pro-necy.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  ...envFrontendUrls,
+].filter(Boolean);
+
+const uniqueAllowedOrigins = [...new Set(allowedOrigins)];
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (isAllowedOrigin(origin, env.FRONTEND_URLS)) return callback(null, true);
+      if (!origin) return callback(null, true);
+
+      if (isAllowedOrigin(origin, uniqueAllowedOrigins)) {
+        return callback(null, true);
+      }
+
+      console.error('CORS blocked for origin:', origin);
+      console.error('Allowed origins:', uniqueAllowedOrigins);
+
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
@@ -103,7 +127,7 @@ app.use((err, _req, res, _next) => {
 const server = app.listen(env.PORT, () => {
   console.log('====================================');
   console.log(`ZedExam Pro backend running on port ${env.PORT}`);
-  console.log(`Frontend URL: ${env.FRONTEND_URLS.join(', ') || 'not configured'}`);
+  console.log(`Allowed frontend URLs: ${uniqueAllowedOrigins.join(', ') || 'not configured'}`);
   console.log(`Uploads folder: ${env.UPLOAD_DIR}`);
   console.log('Routes loaded:');
   console.log('- GET /');

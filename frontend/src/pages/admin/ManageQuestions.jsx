@@ -47,9 +47,9 @@ function buildQuestionPayload(form, topicId) {
   };
 
   if (questionType === 'PASSAGE_BASED') payload.passage = form.passage.trim();
-  if (questionType === 'IMAGE_BASED') payload.imageUrl = form.imageUrl.trim();
-
   if (['MCQ', 'PASSAGE_BASED', 'IMAGE_BASED'].includes(questionType)) {
+    payload.imageUrl = form.imageUrl.trim();
+
     payload.optionA = form.optionA.trim();
     payload.optionB = form.optionB.trim();
     payload.optionC = form.optionC.trim();
@@ -82,7 +82,7 @@ function normalizeFormByQuestionType(currentForm, nextType) {
 
   if (!['SHORT_ANSWER', 'STRUCTURED'].includes(nextType)) next.answerText = '';
   if (nextType !== 'PASSAGE_BASED') next.passage = '';
-  if (nextType !== 'IMAGE_BASED') next.imageUrl = '';
+  if (!['MCQ', 'PASSAGE_BASED', 'IMAGE_BASED'].includes(nextType)) next.imageUrl = '';
 
   if (['SHORT_ANSWER', 'STRUCTURED'].includes(nextType)) {
     next.correctAnswer = next.answerText || next.correctAnswer;
@@ -294,11 +294,11 @@ export default function ManageQuestions() {
   const selectedTopicName = topics.find((topic) => String(topic.id) === String(topicId))?.title || '';
   const imagePreviewUrl = form.imageUrl ? (form.imageUrl.startsWith('http') ? form.imageUrl : `${API_ROOT}${form.imageUrl}`) : '';
   const typeHelp = {
-    MCQ: 'Use four options and set the correct answer to the exact option text or letter A-D.',
+    MCQ: 'Use four options and set the correct answer to the exact option text or letter A-D. Add an optional diagram or picture when the exam question needs one.',
     SHORT_ANSWER: 'Use the expected learner response. Options are not needed.',
     STRUCTURED: 'Use model marking-point text or a concise expected answer.',
-    PASSAGE_BASED: 'Provide a passage plus four answer options.',
-    IMAGE_BASED: 'Upload a diagram or image, then provide four answer options.',
+    PASSAGE_BASED: 'Provide a passage plus four answer options. You can also attach an optional supporting diagram or picture.',
+    IMAGE_BASED: 'Legacy diagram-focused MCQ. For most visual exam questions, use standard MCQ with an optional diagram or picture.',
   };
 
   return (
@@ -308,7 +308,7 @@ export default function ManageQuestions() {
           <div>
             <div style={eyebrow}>ZedExam Pro Admin</div>
             <h1 style={heroTitle}>Manage Questions</h1>
-            <p style={heroText}>Create polished MCQ, short-answer, structured, passage-based, and image-based questions from one place.</p>
+            <p style={heroText}>Create polished MCQs, short-answer, structured, passage-based, and diagram-supported questions from one place.</p>
           </div>
 
           <div style={headerActions}>
@@ -348,13 +348,13 @@ export default function ManageQuestions() {
 
             {form.questionType === 'PASSAGE_BASED' ? <TextArea label="Passage / Scenario" value={form.passage} onChange={(value) => setField('passage', value)} placeholder="Enter the reading passage or scenario here." rows={6} /> : null}
 
-            {form.questionType === 'IMAGE_BASED' ? (
+            {['MCQ', 'PASSAGE_BASED', 'IMAGE_BASED'].includes(form.questionType) ? (
               <div style={grid2}>
-                <TextInput label="Image URL" value={form.imageUrl} onChange={(value) => setField('imageUrl', value)} placeholder="/uploads/example.png or https://..." />
+                <TextInput label="Diagram / Image URL (optional)" value={form.imageUrl} onChange={(value) => setField('imageUrl', value)} placeholder="/uploads/example.png or https://..." />
                 <div>
                   <label style={label}>Upload Diagram / Image</label>
                   <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e.target.files?.[0])} style={input} />
-                  <div style={helperText}>{uploading ? 'Uploading image...' : 'PNG, JPG, WEBP, and GIF supported.'}</div>
+                  <div style={helperText}>{uploading ? 'Uploading image...' : 'Add a graph, geometry figure, apparatus, map, screenshot, or other exam diagram.'}</div>
                 </div>
               </div>
             ) : null}
@@ -410,7 +410,7 @@ export default function ManageQuestions() {
                   <div style={typeBadge}>{String(question.questionType || 'MCQ').replace(/_/g, ' ')}</div>
                   <div style={questionText}>{question.question}</div>
                   {question.passage ? <div style={metaBlock}><strong>Passage:</strong> {question.passage}</div> : null}
-                  {question.imageUrl ? <img src={question.imageUrl.startsWith('http') ? question.imageUrl : `${API_ROOT}${question.imageUrl}`} alt="Question" style={questionImage} /> : null}
+                  {question.imageUrl ? <img src={question.imageUrl.startsWith('http') ? question.imageUrl : `${API_ROOT}${question.imageUrl}`} alt="Question diagram" style={questionImage} /> : null}
                   {question.optionA ? <ul style={optionList}><li>A. {question.optionA}</li><li>B. {question.optionB}</li><li>C. {question.optionC}</li><li>D. {question.optionD}</li></ul> : null}
                   {question.correctAnswer ? <div style={metaBlock}><strong>Correct:</strong> {question.correctAnswer}</div> : null}
                   {question.answerText ? <div style={metaBlock}><strong>Answer text:</strong> {question.answerText}</div> : null}

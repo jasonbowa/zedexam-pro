@@ -124,7 +124,7 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-const server = app.listen(env.PORT, () => {
+const server = app.listen(env.PORT, '0.0.0.0', () => {
   console.log('====================================');
   console.log(`ZedExam Pro backend running on port ${env.PORT}`);
   console.log(`Allowed frontend URLs: ${uniqueAllowedOrigins.join(', ') || 'not configured'}`);

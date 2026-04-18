@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, Link } from "react-router-dom";
 
 import Login from "./pages/Login";
+import Register from "./pages/Register";
+import AdminLogin from "./pages/AdminLogin";
 import Dashboard from "./pages/Dashboard";
 import Subjects from "./pages/Subjects";
 import SubjectDetails from "./pages/SubjectDetails";
@@ -193,6 +195,15 @@ export default function App() {
   return (
     <Routes>
       <Route
+        path="/"
+        element={
+          <PublicRoute>
+            <Login />
+          </PublicRoute>
+        }
+      />
+
+      <Route
         path="/login"
         element={
           <PublicRoute>
@@ -202,11 +213,20 @@ export default function App() {
       />
 
       <Route
-        path="/"
+        path="/register"
         element={
-          <ProtectedRoute>
-            <Navigate to="/dashboard" replace />
-          </ProtectedRoute>
+          <PublicRoute>
+            <Register />
+          </PublicRoute>
+        }
+      />
+
+      <Route
+        path="/admin-login"
+        element={
+          <PublicRoute>
+            <AdminLogin />
+          </PublicRoute>
         }
       />
 

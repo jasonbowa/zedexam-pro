@@ -1,237 +1,349 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { publicFetch, saveAuth, getToken, getStoredUser, isTokenExpired } from '../api';
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { getStoredUser, saveAuth, studentLogin } from "../api";
 
-const gradeOptions = [
-  { value: 'FORM 1', label: 'FORM 1' },
-  { value: 'FORM 2', label: 'FORM 2' },
-  { value: 'FORM 3', label: 'FORM 3' },
-  { value: 'FORM 4', label: 'FORM 4' },
-  { value: 'GRADE 10', label: 'GRADE 10' },
-  { value: 'GRADE 11', label: 'GRADE 11' },
-  { value: 'GRADE 12', label: 'GRADE 12' },
+const onboardingSteps = [
+  {
+    number: "01",
+    title: "Create your account",
+    text: "Tap Student Register, enter your full name, phone number, grade, and password.",
+  },
+  {
+    number: "02",
+    title: "Choose your level",
+    text: "Select the correct class level so the platform shows the right subjects and materials.",
+  },
+  {
+    number: "03",
+    title: "Start practicing",
+    text: "Open a subject, answer questions, and build confidence with exam-style practice.",
+  },
+  {
+    number: "04",
+    title: "Track performance",
+    text: "See your scores, monitor weak areas, and improve topic by topic.",
+  },
 ];
 
-const normalizeGrade = (grade) => String(grade || '').replace(/_/g, ' ').trim();
+const featureHighlights = [
+  "ECZ-style exam practice",
+  "Mobile-friendly learning",
+  "Instant score tracking",
+  "Designed for Zambian learners",
+];
 
 export default function Login() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('student-login');
-  const [form, setForm] = useState({
-    name: '',
-    phone: '',
-    grade: 'FORM 1',
-    email: 'admin@zedexam.com',
-    password: '',
-  });
+  const location = useLocation();
+
+  const [phoneNumber, setPhoneNumber] = useState(location.state?.phoneNumber || "");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    const token = getToken();
     const user = getStoredUser();
-    if (token && user && !isTokenExpired(token)) {
-      navigate(user.role === 'admin' || user.isAdmin ? '/admin' : '/dashboard', { replace: true });
+
+    if (user?.role === "admin") {
+      navigate("/admin");
+      return;
+    }
+
+    if (user?.role === "student") {
+      navigate("/dashboard");
     }
   }, [navigate]);
 
-  const title = useMemo(() => {
-    if (mode === 'student-register') return 'Create student account';
-    if (mode === 'admin-login') return 'Administrator access';
-    return 'Student login';
-  }, [mode]);
-
-  const subtitle = useMemo(() => {
-    if (mode === 'student-register') return 'Register a learner profile and start practice immediately.';
-    if (mode === 'admin-login') return 'Use secure admin credentials to manage subjects, topics, and question banks.';
-    return 'Sign in with your phone number and continue learning where you left off.';
-  }, [mode]);
-
-  const updateField = (key, value) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const resetMessages = () => {
-    setError('');
-    setSuccess('');
-  };
-
-  const routeAfterAuth = (user) => (user?.role === 'admin' || user?.isAdmin ? '/admin' : '/dashboard');
-
-  const handleStudentRegister = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    resetMessages();
-
-    if (!form.name.trim() || !form.phone.trim() || !form.password.trim() || !form.grade) {
-      setError('Name, phone, grade, and password are required.');
-      return;
-    }
-
+    setError("");
     setLoading(true);
+
     try {
-      const data = await publicFetch('/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: form.name.trim(),
-          phone: form.phone.trim(),
-          password: form.password,
-          grade: normalizeGrade(form.grade),
-        }),
-      });
+      const data = await studentLogin({ phoneNumber, password });
 
-      saveAuth({ token: data.token, user: data.user });
-      setSuccess('Student account created successfully.');
-      navigate(routeAfterAuth(data.user), { replace: true });
+      if (!data?.user) {
+        throw new Error("Invalid login response.");
+      }
+
+      if (data.user.role && data.user.role !== "student") {
+        throw new Error("This page is for students. Use Admin Login for admin access.");
+      }
+
+      saveAuth(data);
+      navigate("/dashboard");
     } catch (err) {
-      setError(err.message || 'Registration failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleStudentLogin = async (e) => {
-    e.preventDefault();
-    resetMessages();
-
-    if (!form.phone.trim() || !form.password.trim()) {
-      setError('Phone number and password are required.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await publicFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ phone: form.phone.trim(), password: form.password }),
-      });
-      saveAuth({ token: data.token, user: data.user });
-      navigate(routeAfterAuth(data.user), { replace: true });
-    } catch (err) {
-      setError(err.message || 'Invalid phone number or password.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
-    resetMessages();
-
-    if (!form.email.trim() || !form.password.trim()) {
-      setError('Email and password are required.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const data = await publicFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: form.email.trim(), password: form.password }),
-      });
-      saveAuth({ token: data.token, user: data.user });
-      navigate(routeAfterAuth(data.user), { replace: true });
-    } catch (err) {
-      setError(err.message || 'Admin login failed.');
+      setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.22),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.14),_transparent_20%),linear-gradient(135deg,#020617_0%,#0f172a_42%,#1e3a8a_100%)] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-7xl gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-        <section className="rounded-[34px] border border-white/10 bg-white/6 p-7 shadow-2xl shadow-slate-950/30 backdrop-blur-xl sm:p-10">
-          <p className="text-xs font-bold uppercase tracking-[0.35em] text-blue-200">Launch-ready interface</p>
-          <h1 className="mt-4 text-4xl font-black tracking-tight sm:text-5xl">ZedExam Pro</h1>
-          <p className="mt-5 max-w-2xl text-base leading-8 text-slate-200 sm:text-lg">
-            A cleaner student experience for ECZ-focused revision, topic practice, mock exams, analytics, and certificates.
-          </p>
-
-          <div className="mt-8 grid gap-4 sm:grid-cols-2">
-            {[
-              ['Smart Revision', 'Organized by subject and topic for faster study flow.'],
-              ['Mock Exam Mode', 'Timed practice that feels closer to real exam conditions.'],
-              ['Result Tracking', 'Students can see progress and improve weak areas.'],
-              ['Admin Control', 'Manage content, students, and question banks from one dashboard.'],
-            ].map(([heading, text]) => (
-              <div key={heading} className="rounded-[24px] border border-white/10 bg-white/8 p-5">
-                <h2 className="text-lg font-bold">{heading}</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-200">{text}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-[34px] border border-white/10 bg-white p-6 text-slate-900 shadow-2xl shadow-slate-950/25 sm:p-8">
-          <div className="flex flex-wrap gap-3">
-            <button className={`btn ${mode === 'student-login' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('student-login')}>Student Login</button>
-            <button className={`btn ${mode === 'student-register' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('student-register')}>Student Register</button>
-            <button className={`btn ${mode === 'admin-login' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setMode('admin-login')}>Admin Login</button>
-          </div>
-
-          <div className="mt-6">
-            <p className="text-xs font-bold uppercase tracking-[0.28em] text-blue-600">Access portal</p>
-            <h2 className="mt-2 text-3xl font-black tracking-tight">{title}</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-500">{subtitle}</p>
-          </div>
-
-          {error ? <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</div> : null}
-          {success ? <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{success}</div> : null}
-
-          {mode === 'student-register' ? (
-            <form className="mt-6 space-y-4" onSubmit={handleStudentRegister}>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Full Name</label>
-                <input className="input h-12" value={form.name} onChange={(e) => updateField('name', e.target.value)} placeholder="Enter student name" />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Phone Number</label>
-                <input className="input h-12" value={form.phone} onChange={(e) => updateField('phone', e.target.value)} placeholder="e.g. 097xxxxxxx" />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Grade</label>
-                <select className="input h-12" value={form.grade} onChange={(e) => updateField('grade', e.target.value)}>
-                  {gradeOptions.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
-                <input type="password" className="input h-12" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder="Create password" />
-              </div>
-              <button className="btn btn-primary h-12 w-full" disabled={loading}>{loading ? 'Creating account...' : 'Create Student Account'}</button>
-            </form>
-          ) : null}
-
-          {mode === 'student-login' ? (
-            <form className="mt-6 space-y-4" onSubmit={handleStudentLogin}>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Phone Number</label>
-                <input className="input h-12" value={form.phone} onChange={(e) => updateField('phone', e.target.value)} placeholder="Use the registered phone number" />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
-                <input type="password" className="input h-12" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder="Enter password" />
-              </div>
-              <button className="btn btn-primary h-12 w-full" disabled={loading}>{loading ? 'Signing in...' : 'Login to Student Portal'}</button>
-            </form>
-          ) : null}
-
-          {mode === 'admin-login' ? (
-            <form className="mt-6 space-y-4" onSubmit={handleAdminLogin}>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Admin Email</label>
-                <input type="email" className="input h-12" value={form.email} onChange={(e) => updateField('email', e.target.value)} placeholder="admin@zedexam.com" />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-700">Password</label>
-                <input type="password" className="input h-12" value={form.password} onChange={(e) => updateField('password', e.target.value)} placeholder="Enter password" />
-              </div>
-              <button className="btn btn-primary h-12 w-full" disabled={loading}>{loading ? 'Opening admin...' : 'Login to Admin Dashboard'}</button>
-            </form>
-          ) : null}
-        </section>
+    <div className="min-h-screen bg-slate-950 text-white overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-20 -left-16 h-72 w-72 rounded-full bg-cyan-500/20 blur-3xl" />
+        <div className="absolute top-40 right-0 h-80 w-80 rounded-full bg-indigo-500/20 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-sky-400/10 blur-3xl" />
       </div>
+
+      <header className="relative z-10 border-b border-white/10 bg-white/5 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <div>
+            <div className="inline-flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500 font-bold text-slate-950 shadow-lg shadow-cyan-500/30">
+                Z
+              </div>
+              <div>
+                <p className="text-lg font-semibold tracking-wide">ZedExam Pro</p>
+                <p className="text-xs text-slate-300">Smart exam practice for serious students</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-3 md:flex">
+            <Link
+              to="/register"
+              className="rounded-xl border border-white/15 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-cyan-400 hover:bg-white/10"
+            >
+              Student Register
+            </Link>
+            <Link
+              to="/admin-login"
+              className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
+            >
+              Admin Login
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <main className="relative z-10 mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-16">
+        <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:gap-10">
+          <section className="space-y-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-200">
+              <span className="inline-block h-2 w-2 rounded-full bg-cyan-300" />
+              Now open for student practice and performance tracking
+            </div>
+
+            <div className="space-y-5">
+              <h1 className="max-w-4xl text-4xl font-extrabold leading-tight sm:text-5xl lg:text-6xl">
+                Study smarter, practice faster, and prepare with confidence using{" "}
+                <span className="bg-gradient-to-r from-cyan-300 via-sky-300 to-indigo-300 bg-clip-text text-transparent">
+                  ZedExam Pro
+                </span>
+              </h1>
+
+              <p className="max-w-3xl text-lg leading-8 text-slate-300">
+                ZedExam Pro helps students practice exam-style questions, strengthen weak topics,
+                and build confidence before tests. It is built for mobile-first learning and made
+                to support serious academic improvement.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/20 to-sky-500/10 p-6 shadow-2xl shadow-cyan-900/20">
+                <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  Featured Promotion
+                </p>
+                <h2 className="text-2xl font-bold text-white">
+                  Turn revision time into real exam confidence
+                </h2>
+                <p className="mt-3 text-sm leading-7 text-slate-200">
+                  Practice topics, monitor your scores, and improve where it matters most. Whether
+                  you are preparing for school tests or major examinations, ZedExam Pro gives you a
+                  cleaner and smarter way to revise.
+                </p>
+
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <Link
+                    to="/register"
+                    className="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-300"
+                  >
+                    Create Student Account
+                  </Link>
+                  <a
+                    href="#how-it-works"
+                    className="rounded-xl border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                  >
+                    See How It Works
+                  </a>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">
+                  Why students join
+                </p>
+
+                <div className="mt-4 grid gap-3">
+                  {featureHighlights.map((item) => (
+                    <div
+                      key={item}
+                      className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-cyan-400/20 text-cyan-300">
+                        ✓
+                      </div>
+                      <span className="text-sm text-slate-100">{item}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-4">
+                    <p className="text-2xl font-bold text-white">24/7</p>
+                    <p className="mt-1 text-xs text-slate-400">Access</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-4">
+                    <p className="text-2xl font-bold text-white">Fast</p>
+                    <p className="mt-1 text-xs text-slate-400">Practice</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/60 px-3 py-4">
+                    <p className="text-2xl font-bold text-white">Clear</p>
+                    <p className="mt-1 text-xs text-slate-400">Progress</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <section id="how-it-works" className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur sm:p-8">
+              <div className="mb-6">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  How to create your account
+                </p>
+                <h3 className="mt-2 text-2xl font-bold text-white sm:text-3xl">
+                  Simple steps to get started
+                </h3>
+                <p className="mt-2 max-w-2xl text-sm leading-7 text-slate-300">
+                  The registration process is quick. Students can create an account in a minute and
+                  begin practicing immediately.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                {onboardingSteps.map((step) => (
+                  <div
+                    key={step.number}
+                    className="rounded-3xl border border-white/10 bg-slate-900/60 p-5 transition hover:border-cyan-400/30 hover:bg-slate-900"
+                  >
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-400/15 text-lg font-bold text-cyan-300">
+                      {step.number}
+                    </div>
+                    <h4 className="text-lg font-semibold text-white">{step.title}</h4>
+                    <p className="mt-2 text-sm leading-7 text-slate-300">{step.text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-5 py-4 text-sm leading-7 text-cyan-100">
+                Tip: after registration, students should use the same phone number and password to
+                log in next time.
+              </div>
+            </section>
+          </section>
+
+          <aside className="lg:sticky lg:top-8 lg:self-start">
+            <div className="rounded-[28px] border border-white/10 bg-white/8 p-6 shadow-2xl backdrop-blur-xl">
+              <div className="mb-6">
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  Student Login
+                </p>
+                <h2 className="mt-2 text-3xl font-bold text-white">Access your portal</h2>
+                <p className="mt-2 text-sm leading-7 text-slate-300">
+                  Sign in with your phone number and continue learning where you left off.
+                </p>
+              </div>
+
+              {error && (
+                <div className="mb-5 rounded-2xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {error}
+                </div>
+              )}
+
+              {location.state?.registered ? (
+                <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                  Account created successfully. You can now log in with your phone number and password.
+                </div>
+              ) : null}
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">
+                    Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="Use the registered phone number"
+                    className="w-full rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    className="w-full rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full rounded-2xl bg-cyan-400 px-4 py-3.5 text-base font-bold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {loading ? "Signing in..." : "Login to Student Portal"}
+                </button>
+              </form>
+
+              <div className="mt-6 space-y-3">
+                <Link
+                  to="/register"
+                  className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-4 transition hover:border-cyan-400/30 hover:bg-slate-900"
+                >
+                  <div>
+                    <p className="font-semibold text-white">New student?</p>
+                    <p className="text-sm text-slate-400">Create an account and start learning</p>
+                  </div>
+                  <span className="text-cyan-300">→</span>
+                </Link>
+
+                <Link
+                  to="/admin-login"
+                  className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-4 transition hover:border-white/20 hover:bg-slate-900"
+                >
+                  <div>
+                    <p className="font-semibold text-white">Admin access</p>
+                    <p className="text-sm text-slate-400">For content and platform management</p>
+                  </div>
+                  <span className="text-slate-300">→</span>
+                </Link>
+              </div>
+
+              <div className="mt-6 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  Quick account creation checklist
+                </p>
+                <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                  <li>• Full name</li>
+                  <li>• Active phone number</li>
+                  <li>• Correct grade selection</li>
+                  <li>• Strong password</li>
+                </ul>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 }

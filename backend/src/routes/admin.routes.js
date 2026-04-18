@@ -159,12 +159,20 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
         await prisma.admin.update({ where: { id: admin.id }, data: { password: hashPassword(providedPassword) } });
       }
       appendAuditLog('admin_login_success', { actorId: admin.id, identifier: normalizedEmail, ip: req.ip });
-      return res.json({ message: 'Admin login successful', token: buildAdminToken(admin.id), admin: { ...toPublicAdmin(admin), role: admin.role || 'Administrator' } });
+      return res.json({
+        message: 'Admin login successful',
+        token: buildAdminToken(admin.id),
+        user: { ...toPublicAdmin(admin), role: 'admin', isAdmin: true },
+      });
     }
 
     if (normalizedEmail === env.ADMIN_EMAIL && verifyPassword(providedPassword, env.ADMIN_PASSWORD)) {
       appendAuditLog('admin_env_login_success', { actorId: 1, identifier: normalizedEmail, ip: req.ip });
-      return res.json({ message: 'Admin login successful', token: buildAdminToken(1), admin: { id: 1, name: env.ADMIN_NAME, email: env.ADMIN_EMAIL, role: 'Administrator' } });
+      return res.json({
+        message: 'Admin login successful',
+        token: buildAdminToken(1),
+        user: { id: 1, name: env.ADMIN_NAME, email: env.ADMIN_EMAIL, role: 'admin', isAdmin: true },
+      });
     }
 
     appendAuditLog('admin_login_failed', { identifier: normalizedEmail, ip: req.ip });

@@ -20,7 +20,6 @@ function canStudentAccessGrade(studentGrade, subjectGrade) {
 
   if (!normalizedStudentGrade || !normalizedSubjectGrade) return false;
 
-  // Form 4 and Grade 12 can access all subject levels
   if (normalizedStudentGrade === "FORM_4" || normalizedStudentGrade === "GRADE_12") {
     return true;
   }
@@ -164,10 +163,9 @@ router.get("/:id", requireAuth, async (req, res) => {
 
 router.post("/", requireAdmin, async (req, res) => {
   try {
-    const { name, grade, description, accessPlan } = req.body;
+    const { name, grade, description } = req.body;
     const trimmedName = String(name || "").trim();
     const normalizedGrade = normalizeGrade(grade);
-    const normalizedAccessPlan = String(accessPlan || "").trim() || "Free";
 
     if (!trimmedName || !normalizedGrade) {
       return res.status(400).json({
@@ -188,7 +186,6 @@ router.post("/", requireAdmin, async (req, res) => {
         name: trimmedName,
         description: description ? String(description).trim() : null,
         grade: normalizedGrade,
-        accessPlan: normalizedAccessPlan,
       },
       include: { _count: { select: { topics: true, mockExams: true } } },
     });
@@ -203,7 +200,7 @@ router.post("/", requireAdmin, async (req, res) => {
 router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { name, grade, description, accessPlan } = req.body;
+    const { name, grade, description } = req.body;
 
     if (Number.isNaN(id)) {
       return res.status(400).json({ message: "Invalid subject ID" });
@@ -211,7 +208,6 @@ router.put("/:id", requireAdmin, async (req, res) => {
 
     const trimmedName = String(name || "").trim();
     const normalizedGrade = normalizeGrade(grade);
-    const normalizedAccessPlan = String(accessPlan || "").trim() || "Free";
 
     if (!trimmedName || !normalizedGrade) {
       return res.status(400).json({
@@ -237,7 +233,6 @@ router.put("/:id", requireAdmin, async (req, res) => {
         name: trimmedName,
         description: description ? String(description).trim() : null,
         grade: normalizedGrade,
-        accessPlan: normalizedAccessPlan,
       },
       include: { _count: { select: { topics: true, mockExams: true } } },
     });

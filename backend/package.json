@@ -4,6 +4,7 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
+    "prestart": "npx prisma db push || echo \"Prisma db push failed; continuing startup\"",
     "start": "node server.js",
     "dev": "node server.js",
     "deploy:start": "node server.js",

@@ -3,8 +3,9 @@ import { useEffect, useState } from 'react';
 import PageShell from '../../components/PageShell';
 import { authFetch } from '../../api';
 import { EmptyState, LoadingState, Notice, SectionCard } from '../../components/ui';
+import PaymentInstructions from '../../components/PaymentInstructions';
 
-const formBlank = { studentId: '', packageId: '', schoolId: '', sponsorName: '', activationCode: '', notes: '', status: 'ACTIVE', startDate: '' };
+const formBlank = { studentId: '', packageId: '', schoolId: '', sponsorName: '', activationCode: '', paymentReference: '', amountPaid: '', notes: '', status: 'PENDING', startDate: '' };
 
 export default function StudentSubscriptions() {
   const [students, setStudents] = useState([]);
@@ -62,44 +63,73 @@ export default function StudentSubscriptions() {
     }
   };
 
+  const activatePlan = async (id) => {
+    setMessage('');
+    setError('');
+    try {
+      await authFetch(`/subscriptions/admin/assignments/${id}/activate`, { method: 'PATCH', body: JSON.stringify({}) });
+      setMessage('Student package activated after payment confirmation.');
+      await loadData();
+    } catch (err) {
+      setError(err.message || 'Failed to activate subscription.');
+    }
+  };
+
+  const deactivatePlan = async (id) => {
+    setMessage('');
+    setError('');
+    try {
+      await authFetch(`/subscriptions/admin/assignments/${id}/deactivate`, { method: 'PATCH', body: JSON.stringify({}) });
+      setMessage('Student package deactivated.');
+      await loadData();
+    } catch (err) {
+      setError(err.message || 'Failed to deactivate subscription.');
+    }
+  };
+
   return (
     <PageShell title="Student Subscriptions" subtitle="Assign paid or sponsored plans to learners while you prepare full payment integration.">
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
+      <PaymentInstructions status="Pending until confirmed" packageName="Student access" />
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <SectionCard title="Assign Package" subtitle="This is the interim commercial workflow before automated mobile money processing is added.">
           <form className="grid gap-4" onSubmit={assignPlan}>
             <label className="grid gap-2 text-sm font-semibold text-slate-700">Student
-              <select className="rounded-2xl border border-slate-200 px-4 py-3" value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))}>
+              <select className="input" value={form.studentId} onChange={(e) => setForm((prev) => ({ ...prev, studentId: e.target.value }))}>
                 <option value="">Select student</option>
                 {students.map((student) => <option key={student.id} value={student.id}>{student.name} • {student.phoneNumber || student.phone || ''}</option>)}
               </select>
             </label>
             <label className="grid gap-2 text-sm font-semibold text-slate-700">Package
-              <select className="rounded-2xl border border-slate-200 px-4 py-3" value={form.packageId} onChange={(e) => setForm((prev) => ({ ...prev, packageId: e.target.value }))}>
+              <select className="input" value={form.packageId} onChange={(e) => setForm((prev) => ({ ...prev, packageId: e.target.value }))}>
                 <option value="">Select package</option>
                 {packages.map((pkg) => <option key={pkg.id} value={pkg.id}>{pkg.name} • K{Number(pkg.priceZmw || 0).toFixed(2)}</option>)}
               </select>
             </label>
             <label className="grid gap-2 text-sm font-semibold text-slate-700">School Sponsor
-              <select className="rounded-2xl border border-slate-200 px-4 py-3" value={form.schoolId} onChange={(e) => setForm((prev) => ({ ...prev, schoolId: e.target.value }))}>
+              <select className="input" value={form.schoolId} onChange={(e) => setForm((prev) => ({ ...prev, schoolId: e.target.value }))}>
                 <option value="">No school sponsor</option>
                 {schools.map((school) => <option key={school.id} value={school.id}>{school.name}</option>)}
               </select>
             </label>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Sponsor Name<input className="rounded-2xl border border-slate-200 px-4 py-3" value={form.sponsorName} onChange={(e) => setForm((prev) => ({ ...prev, sponsorName: e.target.value }))} /></label>
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Activation Code<input className="rounded-2xl border border-slate-200 px-4 py-3" value={form.activationCode} onChange={(e) => setForm((prev) => ({ ...prev, activationCode: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Sponsor Name<input className="input" value={form.sponsorName} onChange={(e) => setForm((prev) => ({ ...prev, sponsorName: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Activation Code<input className="input" value={form.activationCode} onChange={(e) => setForm((prev) => ({ ...prev, activationCode: e.target.value }))} /></label>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Payment Reference / Transaction ID<input className="input" value={form.paymentReference} onChange={(e) => setForm((prev) => ({ ...prev, paymentReference: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Amount Paid<input type="number" min="0" step="0.01" className="input" value={form.amountPaid} onChange={(e) => setForm((prev) => ({ ...prev, amountPaid: e.target.value }))} /></label>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-2 text-sm font-semibold text-slate-700">Status
-                <select className="rounded-2xl border border-slate-200 px-4 py-3" value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}>
+                <select className="input" value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}>
                   {['ACTIVE', 'PENDING', 'EXPIRED', 'CANCELLED'].map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
               </label>
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Start Date<input type="date" className="rounded-2xl border border-slate-200 px-4 py-3" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Start Date<input type="date" className="input" value={form.startDate} onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))} /></label>
             </div>
-            <label className="grid gap-2 text-sm font-semibold text-slate-700">Notes<textarea className="min-h-[96px] rounded-2xl border border-slate-200 px-4 py-3" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
+            <label className="grid gap-2 text-sm font-semibold text-slate-700">Notes<textarea className="input min-h-[96px] py-3" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
             <button className="btn btn-primary">Assign Package</button>
           </form>
         </SectionCard>
@@ -115,6 +145,13 @@ export default function StudentSubscriptions() {
                     <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">Start: {item.startDate ? new Date(item.startDate).toLocaleDateString() : 'Not set'}</div>
                     <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">End: {item.endDate ? new Date(item.endDate).toLocaleDateString() : 'Not set'}</div>
                     <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">Code: {item.activationCode || '—'}</div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">Proof: {item.proofStatus || 'PENDING'}</div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">Reference: {item.paymentReference || '—'}</div>
+                    <div className="rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200">Amount: {item.amountPaid ? `K${Number(item.amountPaid).toFixed(2)}` : '—'}</div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button className="btn btn-success" onClick={() => activatePlan(item.id)}>Activate after payment</button>
+                    <button className="btn btn-danger" onClick={() => deactivatePlan(item.id)}>Deactivate</button>
                   </div>
                 </div>
               ))}

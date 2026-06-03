@@ -61,6 +61,9 @@ function normalizeQuestionPayload(body = {}) {
     payload.answerText = null;
   }
 
+  if (questionType === 'PASSAGE_BASED') {
+    payload.imageUrl = null;
+  }
 
   if (questionType === 'IMAGE_BASED') {
     payload.passage = null;

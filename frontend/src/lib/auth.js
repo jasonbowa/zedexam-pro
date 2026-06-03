@@ -1,5 +1,5 @@
 const USER_KEY = 'zedexam_user';
-const LEGACY_KEYS = ['user', 'adminUser', 'studentUser', 'student'];
+const LEGACY_KEYS = ['user', 'adminUser', 'studentUser', 'student', 'teacherMaterialsUser'];
 const TOKEN_KEYS = ['adminToken', 'token'];
 
 function parseMaybe(value) {
@@ -27,20 +27,27 @@ export function getStoredUser() {
 }
 
 export function normalizeUser(user = {}) {
+  const role = String(user.role || (user.roleLabel === 'TEACHER_MATERIALS' ? 'teacher_materials' : user.isAdmin ? 'admin' : 'student')).toLowerCase();
   return {
     id: user.id ?? null,
     name: user.name || user.fullName || 'User',
     email: user.email || '',
     phone: user.phone || user.phoneNumber || '',
     grade: user.grade || user.form || '',
-    role: user.role || (user.isAdmin ? 'admin' : 'student'),
+    package: user.package || '',
+    status: user.status || '',
+    role,
     token: user.token || localStorage.getItem('zedexam_token') || localStorage.getItem('adminToken') || null,
-    isAdmin: user.role === 'admin' || user.isAdmin === true,
+    isAdmin: role === 'admin' || user.isAdmin === true,
   };
 }
 
 export function isAdminUser(user = getStoredUser()) {
   return !!user && (user.role === 'admin' || user.isAdmin === true);
+}
+
+export function isTeacherMaterialsUser(user = getStoredUser()) {
+  return !!user && (user.role === 'teacher_materials' || user.role === 'teacher-materials' || user.roleLabel === 'TEACHER_MATERIALS');
 }
 
 export function saveUser(user) {
@@ -57,10 +64,17 @@ export function saveUser(user) {
     localStorage.setItem('adminUser', JSON.stringify(normalized));
     localStorage.removeItem('studentUser');
     localStorage.removeItem('student');
+    localStorage.removeItem('teacherMaterialsUser');
+  } else if (isTeacherMaterialsUser(normalized)) {
+    localStorage.setItem('teacherMaterialsUser', JSON.stringify(normalized));
+    localStorage.removeItem('adminUser');
+    localStorage.removeItem('studentUser');
+    localStorage.removeItem('student');
   } else {
     localStorage.setItem('studentUser', JSON.stringify(normalized));
     localStorage.setItem('student', JSON.stringify(normalized));
     localStorage.removeItem('adminUser');
+    localStorage.removeItem('teacherMaterialsUser');
   }
 }
 
@@ -74,5 +88,6 @@ export function getAuthToken() {
 
 export function getDefaultRouteForUser(user = getStoredUser()) {
   if (!user) return '/login';
+  if (isTeacherMaterialsUser(user)) return '/teacher/dashboard';
   return isAdminUser(user) ? '/admin' : '/dashboard';
 }

@@ -4,7 +4,7 @@ const prisma = require('../lib/prisma');
 const env = require('../config/env');
 const { requireAuth } = require('../middleware/auth');
 const { buildCertificatePayload, buildCertificateCode } = require('../utils/certificates');
-const { getStudentPlanContext, ensureStudentCanAccessMockExam } = require('../utils/subscriptions');
+const { canStudentAccessMockExam, canStudentAccessTopic, deniedPayload } = require('../utils/accessControl');
 
 async function getOrCreateQuizForTopic(topicId, title) {
   const existingQuiz = await prisma.quiz.findFirst({ where: { topicId }, orderBy: { id: 'asc' } });
@@ -41,12 +41,11 @@ function buildResultWhere(req) {
   return { studentId: Number(req.user.id) };
 }
 
-function serializeResult(result, options = {}) {
+function serializeResult(result) {
   const total = Number(result.total || 0);
   const score = Number(result.score || 0);
   const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
-  const certificatesEnabled = options.certificatesEnabled !== false;
-  const certificate = certificatesEnabled && percentage >= 50 ? buildCertificatePayload({ result, secret: env.AUTH_SECRET, baseUrl: env.APP_BASE_URL }) : null;
+  const certificate = percentage >= 50 ? buildCertificatePayload({ result, secret: env.AUTH_SECRET, baseUrl: env.APP_BASE_URL }) : null;
 
   return {
     ...result,
@@ -208,10 +207,12 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ message: `Student with ID ${parsedStudentId} is deactivated` });
     }
 
-    if (!req.user?.isAdmin && !Number.isNaN(parsedMockExamId) && parsedMockExamId > 0) {
-      const mockAccess = await ensureStudentCanAccessMockExam(studentExists, parsedMockExamId);
-      if (!mockAccess.allowed) {
-        return res.status(mockAccess.status || 403).json({ message: mockAccess.reason });
+    if (!req.user?.isAdmin) {
+      const access = !Number.isNaN(parsedMockExamId) && parsedMockExamId > 0
+        ? await canStudentAccessMockExam(req.user, parsedMockExamId)
+        : await canStudentAccessTopic(req.user, quiz.topicId || topicId);
+      if (!access.allowed) {
+        return res.status(403).json(deniedPayload(access.access, access.access?.reason || 'Your current package does not allow this submission.'));
       }
     }
 
@@ -263,8 +264,7 @@ router.post('/', requireAuth, async (req, res) => {
       },
     });
 
-    const certificatesEnabled = req.user?.isAdmin ? true : (await getStudentPlanContext(parsedStudentId)).capabilities.includesCertificates;
-    return res.json({ message: 'Result saved successfully', result: serializeResult(result, { certificatesEnabled }) });
+    return res.json({ message: 'Result saved successfully', result: serializeResult(result) });
   } catch (error) {
     console.error('POST /api/results error:', error);
     return res.status(500).json({ message: 'Failed to save result', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
@@ -282,8 +282,7 @@ router.get('/', requireAuth, async (req, res) => {
         mockExam: { select: { id: true, title: true, durationMinutes: true, topic: { select: { id: true, title: true } } } },
       },
     });
-    const certificatesEnabled = req.user?.isAdmin ? true : (await getStudentPlanContext(req.user.id)).capabilities.includesCertificates;
-    return res.json(results.map((item) => serializeResult(item, { certificatesEnabled })));
+    return res.json(results.map(serializeResult));
   } catch (error) {
     console.error('GET /api/results error:', error);
     return res.status(500).json({ message: 'Failed to fetch results' });
@@ -301,8 +300,7 @@ router.get('/my-results', requireAuth, async (req, res) => {
         mockExam: { select: { id: true, title: true, durationMinutes: true, topic: { select: { id: true, title: true } } } },
       },
     });
-    const certificatesEnabled = req.user?.isAdmin ? true : (await getStudentPlanContext(req.user.id)).capabilities.includesCertificates;
-    return res.json(results.map((item) => serializeResult(item, { certificatesEnabled })));
+    return res.json(results.map(serializeResult));
   } catch (error) {
     console.error('GET /api/results/my-results error:', error);
     return res.status(500).json({ message: 'Failed to fetch my results' });
@@ -316,8 +314,7 @@ router.get('/:id', requireAuth, async (req, res) => {
     const result = await includeResultById(id);
     if (!result) return res.status(404).json({ message: 'Result not found' });
     if (!req.user?.isAdmin && Number(result.studentId) !== Number(req.user.id)) return res.status(403).json({ message: 'Not allowed to view this result' });
-    const certificatesEnabled = req.user?.isAdmin ? true : (await getStudentPlanContext(req.user.id)).capabilities.includesCertificates;
-    return res.json(serializeResult(result, { certificatesEnabled }));
+    return res.json(serializeResult(result));
   } catch (error) {
     console.error('GET /api/results/:id error:', error);
     return res.status(500).json({ message: 'Failed to fetch result' });

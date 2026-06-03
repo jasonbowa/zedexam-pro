@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import PageShell from '../../components/PageShell';
 import { authFetch } from '../../api';
 import { EmptyState, LoadingState, Notice, SectionCard } from '../../components/ui';
+import PaymentInstructions from '../../components/PaymentInstructions';
 
 const blankPackage = {
   name: '',
@@ -93,18 +94,19 @@ export default function ManagePackages() {
     <PageShell title="Manage Subscription Packages" subtitle="Create daily, weekly, monthly, or sponsored plan structures for monetization.">
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
+      <PaymentInstructions status="Manual activation" packageName="Student packages" />
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <SectionCard title={editingId ? 'Edit Package' : 'Create Package'} subtitle="Use this to prepare pricing and access tiers before mobile money integration.">
           <form className="grid gap-4" onSubmit={submit}>
-            <label className="grid gap-2 text-sm font-semibold text-slate-700">Package Name<input className="rounded-2xl border border-slate-200 px-4 py-3" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
-            <label className="grid gap-2 text-sm font-semibold text-slate-700">Description<textarea className="min-h-[90px] rounded-2xl border border-slate-200 px-4 py-3" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} /></label>
+            <label className="grid gap-2 text-sm font-semibold text-slate-700">Package Name<input className="input" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} /></label>
+            <label className="grid gap-2 text-sm font-semibold text-slate-700">Description<textarea className="input min-h-[90px] py-3" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} /></label>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Duration (days)<input type="number" className="rounded-2xl border border-slate-200 px-4 py-3" value={form.durationDays} onChange={(e) => setForm((prev) => ({ ...prev, durationDays: e.target.value }))} /></label>
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Price (ZMW)<input type="number" className="rounded-2xl border border-slate-200 px-4 py-3" value={form.priceZmw} onChange={(e) => setForm((prev) => ({ ...prev, priceZmw: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Duration (days)<input type="number" className="input" value={form.durationDays} onChange={(e) => setForm((prev) => ({ ...prev, durationDays: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Price (ZMW)<input type="number" className="input" value={form.priceZmw} onChange={(e) => setForm((prev) => ({ ...prev, priceZmw: e.target.value }))} /></label>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Max Subjects<input type="number" className="rounded-2xl border border-slate-200 px-4 py-3" value={form.maxSubjects} onChange={(e) => setForm((prev) => ({ ...prev, maxSubjects: e.target.value }))} /></label>
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">Max Mock Exams<input type="number" className="rounded-2xl border border-slate-200 px-4 py-3" value={form.maxMockExams} onChange={(e) => setForm((prev) => ({ ...prev, maxMockExams: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Max Subjects<input type="number" className="input" value={form.maxSubjects} onChange={(e) => setForm((prev) => ({ ...prev, maxSubjects: e.target.value }))} /></label>
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">Max Mock Exams<input type="number" className="input" value={form.maxMockExams} onChange={(e) => setForm((prev) => ({ ...prev, maxMockExams: e.target.value }))} /></label>
             </div>
             <div className="grid gap-3 md:grid-cols-3 text-sm">
               {[

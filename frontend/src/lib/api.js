@@ -3,12 +3,12 @@ import { getAuthToken } from './auth';
 
 const resolveApiBaseUrl = () => {
   const raw = String(import.meta.env.VITE_API_URL || '').trim();
-  if (!raw) return '';
+  if (!raw) return 'https://zedexam.onrender.com';
   return raw.replace(/\/api\/?$/, '').replace(/\/+$/, '');
 };
 
 export const API_BASE_URL = resolveApiBaseUrl();
-export const API = API_BASE_URL ? `${API_BASE_URL}/api` : '/api';
+export const API = `${API_BASE_URL}/api`;
 
 export const api = axios.create({
   baseURL: API,

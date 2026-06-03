@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { API_ROOT, authFetch, clearAuth, getStoredUser } from "../../api";
+import { authFetch, clearAuth, getStoredUser } from "../../api";
 
 export default function BulkUpload() {
   const navigate = useNavigate();
@@ -123,8 +123,7 @@ export default function BulkUpload() {
           optionD: item.optionD,
           correctAnswer: item.correctAnswer,
           explanation: item.explanation || "",
-          imageUrl: item.image || "",
-          questionType: "MCQ",
+          image: item.image || "",
         };
 
         await authFetch("/questions", {
@@ -170,10 +169,6 @@ EXPLANATION: A mouse is used to enter data and commands into a computer.`);
     topics.find((topic) => String(topic.id) === String(topicId))?.name ||
     "";
   const adminName = user?.name || "Admin";
-  const resolveImageUrl = (value) => {
-    if (!value) return "";
-    return /^https?:\/\//i.test(value) ? value : `${API_ROOT}${value}`;
-  };
 
   return (
     <div style={pageShell}>
@@ -281,7 +276,7 @@ EXPLANATION: A mouse is used to enter data and commands into a computer.`);
                 <div>
                   <h2 style={sectionTitle}>Step 2: Paste Questions</h2>
                   <p style={sectionSubtitle}>
-                    Paste your content using the required structure below. Add an optional IMAGE: line for diagram-based MCQs.
+                    Paste your content using the required structure below.
                   </p>
                 </div>
 
@@ -301,13 +296,12 @@ D: 6
 ANSWER: 4
 EXPLANATION: 2 + 2 equals 4.
 
-QUESTION: Study the diagram and identify the correct answer.
-IMAGE: https://example.com/diagram.png
+QUESTION: Another question here...
 A: Option A
 B: Option B
 C: Option C
 D: Option D
-ANSWER: B`}
+ANSWER: Option B`}
                 </pre>
               </div>
 
@@ -392,9 +386,6 @@ ANSWER: B`}
                       <div style={infoBlock}>
                         <div style={infoLabel}>Image</div>
                         <div style={imageLinkText}>{item.image}</div>
-                        {/^(https?:\/\/|\/uploads\/)/i.test(item.image) ? (
-                          <img src={resolveImageUrl(item.image)} alt="Preview diagram" style={{ marginTop: '10px', width: '100%', maxHeight: '220px', objectFit: 'contain', borderRadius: '14px', border: '1px solid rgba(148,163,184,0.28)', background: '#fff' }} />
-                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -454,8 +445,8 @@ function parseBulkQuestions(text) {
         correctAnswer = line.replace(/^ANSWER\s*:\s*/i, "").trim().toUpperCase();
       } else if (/^EXPLANATION\s*:/i.test(line)) {
         explanation = line.replace(/^EXPLANATION\s*:\s*/i, "").trim();
-      } else if (/^(IMAGE|IMAGE_URL)\s*:/i.test(line)) {
-        image = line.replace(/^(IMAGE|IMAGE_URL)\s*:\s*/i, "").trim();
+      } else if (/^IMAGE\s*:/i.test(line)) {
+        image = line.replace(/^IMAGE\s*:\s*/i, "").trim();
       } else if (!question) {
         question = line;
       }

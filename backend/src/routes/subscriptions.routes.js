@@ -1,12 +1,78 @@
+
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { createRateLimiter } = require('../middleware/rateLimit');
 const { logAdminAction } = require('../utils/audit');
-const { getStudentPlanContext } = require('../utils/subscriptions');
+const { getPaymentInstructions } = require('../utils/payment');
+const { buildStudentAccessPayload } = require('../utils/accessControl');
 
 const writeLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 50, keyPrefix: 'subscription-write' });
+const SUBSCRIPTION_STATUSES = ['ACTIVE', 'PENDING', 'EXPIRED', 'INACTIVE', 'CANCELLED'];
+const PROOF_STATUSES = ['PENDING', 'SENT', 'CONFIRMED', 'REJECTED'];
+
+function normalizeStatus(value, fallback = 'ACTIVE') {
+  const status = String(value || fallback).trim().toUpperCase();
+  return SUBSCRIPTION_STATUSES.includes(status) ? status : null;
+}
+
+function normalizeProofStatus(value, fallback = 'PENDING') {
+  const status = String(value || fallback).trim().toUpperCase();
+  return PROOF_STATUSES.includes(status) ? status : fallback;
+}
+
+function parseOptionalAmount(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
+}
+
+function buildPaymentUpdate(req, proofStatus = 'PENDING') {
+  const data = { proofStatus: normalizeProofStatus(req.body.proofStatus, proofStatus) };
+  const paymentReference = String(req.body.paymentReference || req.body.transactionId || '').trim();
+  const amountPaid = parseOptionalAmount(req.body.amountPaid);
+
+  if (paymentReference) data.paymentReference = paymentReference;
+  if (amountPaid !== undefined) data.amountPaid = amountPaid;
+  if (req.body.notes !== undefined) data.notes = String(req.body.notes || '').trim() || null;
+
+  return data;
+}
+
+function getAdminConfirmationLabel(req) {
+  return req.user?.email || req.user?.id ? `admin:${req.user.email || req.user.id}` : 'admin';
+}
+
+function getPackageEndDate(startDate, pkg) {
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + Number(pkg?.durationDays || 30));
+  return endDate;
+}
+
+router.get('/public-packages', async (_req, res) => {
+  try {
+    const packages = await prisma.subscriptionPackage.findMany({
+      where: { active: true },
+      orderBy: [{ priceZmw: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        durationDays: true,
+        priceZmw: true,
+        maxSubjects: true,
+        maxMockExams: true,
+        includesReports: true,
+        includesCertificates: true,
+      },
+    });
+    return res.json(packages);
+  } catch (error) {
+    console.error('GET /api/subscriptions/public-packages error:', error);
+    return res.status(500).json({ message: 'Failed to load public subscription packages' });
+  }
+});
 
 router.get('/packages', requireAuth, async (_req, res) => {
   try {
@@ -16,6 +82,10 @@ router.get('/packages', requireAuth, async (_req, res) => {
     console.error('GET /api/subscriptions/packages error:', error);
     return res.status(500).json({ message: 'Failed to load subscription packages' });
   }
+});
+
+router.get('/payment-instructions', requireAuth, (_req, res) => {
+  return res.json({ paymentInstructions: getPaymentInstructions() });
 });
 
 router.post('/packages', requireAdmin, writeLimiter, async (req, res) => {
@@ -89,11 +159,19 @@ router.delete('/packages/:id', requireAdmin, writeLimiter, async (req, res) => {
 router.get('/my-plan', requireAuth, async (req, res) => {
   try {
     if (req.user?.isAdmin) {
-      return res.json({ subscription: null, capabilities: null, note: 'Admins do not have learner subscription plans' });
+      return res.json({ subscription: null, note: 'Admins do not have learner subscription plans' });
     }
 
-    const { subscription, capabilities } = await getStudentPlanContext(req.user.id);
-    return res.json({ subscription, capabilities });
+    const subscription = await prisma.studentSubscription.findFirst({
+      where: { studentId: req.user.id },
+      orderBy: [{ createdAt: 'desc' }],
+      include: { package: true, school: true },
+    });
+    if (subscription?.status === 'ACTIVE' && subscription.endDate && new Date(subscription.endDate).getTime() < Date.now()) {
+      subscription.status = 'EXPIRED';
+      await prisma.studentSubscription.update({ where: { id: subscription.id }, data: { status: 'EXPIRED' } }).catch(() => null);
+    }
+    return res.json({ subscription, access: buildStudentAccessPayload(subscription), paymentInstructions: getPaymentInstructions() });
   } catch (error) {
     console.error('GET /api/subscriptions/my-plan error:', error);
     return res.status(500).json({ message: 'Failed to load current plan' });
@@ -119,13 +197,20 @@ router.post('/assign', requireAdmin, writeLimiter, async (req, res) => {
     const packageId = Number(req.body.packageId);
     const schoolId = req.body.schoolId ? Number(req.body.schoolId) : null;
     const sponsorName = String(req.body.sponsorName || '').trim() || null;
-    const status = String(req.body.status || 'ACTIVE').trim().toUpperCase();
+    const status = normalizeStatus(req.body.status, 'ACTIVE');
     const activationCode = String(req.body.activationCode || '').trim() || null;
     const notes = String(req.body.notes || '').trim() || null;
     const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+    const paymentReference = String(req.body.paymentReference || req.body.transactionId || '').trim() || null;
+    const amountPaid = parseOptionalAmount(req.body.amountPaid);
+    const proofStatus = normalizeProofStatus(req.body.proofStatus, status === 'ACTIVE' ? 'CONFIRMED' : 'PENDING');
 
     if (!studentId || !packageId) {
       return res.status(400).json({ message: 'studentId and packageId are required' });
+    }
+
+    if (!status) {
+      return res.status(400).json({ message: `status must be one of: ${SUBSCRIPTION_STATUSES.join(', ')}` });
     }
 
     const pkg = await prisma.subscriptionPackage.findUnique({ where: { id: packageId } });
@@ -133,13 +218,6 @@ router.post('/assign', requireAdmin, writeLimiter, async (req, res) => {
 
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + Number(pkg.durationDays || 30));
-
-    if (status === 'ACTIVE') {
-      await prisma.studentSubscription.updateMany({
-        where: { studentId, status: 'ACTIVE' },
-        data: { status: 'EXPIRED', endDate: new Date() },
-      });
-    }
 
     const created = await prisma.studentSubscription.create({
       data: {
@@ -149,9 +227,14 @@ router.post('/assign', requireAdmin, writeLimiter, async (req, res) => {
         sponsorName,
         status,
         activationCode,
+        paymentReference,
+        amountPaid,
+        proofStatus,
+        confirmedBy: status === 'ACTIVE' ? getAdminConfirmationLabel(req) : null,
+        confirmedAt: status === 'ACTIVE' ? new Date() : null,
         notes,
-        startDate,
-        endDate,
+        startDate: status === 'ACTIVE' ? startDate : null,
+        endDate: status === 'ACTIVE' ? endDate : null,
       },
       include: { student: true, package: true, school: true },
     });
@@ -161,6 +244,86 @@ router.post('/assign', requireAdmin, writeLimiter, async (req, res) => {
   } catch (error) {
     console.error('POST /api/subscriptions/assign error:', error);
     return res.status(500).json({ message: 'Failed to assign subscription' });
+  }
+});
+
+router.patch('/admin/assignments/:id/activate', requireAdmin, writeLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'Invalid subscription id' });
+
+    const existing = await prisma.studentSubscription.findUnique({ where: { id }, include: { package: true } });
+    if (!existing) return res.status(404).json({ message: 'Subscription not found' });
+
+    const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+    const data = {
+      ...buildPaymentUpdate(req, 'CONFIRMED'),
+      status: 'ACTIVE',
+      startDate,
+      endDate: getPackageEndDate(startDate, existing.package),
+      confirmedBy: getAdminConfirmationLabel(req),
+      confirmedAt: new Date(),
+    };
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const subscription = await tx.studentSubscription.update({
+        where: { id },
+        data,
+        include: { student: true, package: true, school: true },
+      });
+
+      const student = await tx.student.update({
+        where: { id: subscription.studentId },
+        data: { isActive: true, status: 'active', deactivatedAt: null },
+      });
+
+      return { ...subscription, student };
+    });
+    logAdminAction(req, 'subscription_payment_confirmed', { subscriptionId: id, studentId: updated.studentId, packageId: updated.packageId });
+    return res.json({ message: 'Student package activated after payment confirmation', subscription: updated });
+  } catch (error) {
+    console.error('PATCH /api/subscriptions/admin/assignments/:id/activate error:', error);
+    return res.status(500).json({ message: 'Failed to activate subscription' });
+  }
+});
+
+router.patch('/admin/assignments/:id/deactivate', requireAdmin, writeLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'Invalid subscription id' });
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const subscription = await tx.studentSubscription.update({
+        where: { id },
+        data: {
+          ...buildPaymentUpdate(req, 'REJECTED'),
+          status: 'INACTIVE',
+          startDate: null,
+          endDate: null,
+          confirmedBy: null,
+          confirmedAt: null,
+        },
+        include: { student: true, package: true, school: true },
+      });
+
+      const activeCount = await tx.studentSubscription.count({
+        where: { studentId: subscription.studentId, status: 'ACTIVE', id: { not: id } },
+      });
+      if (activeCount === 0) {
+        const student = await tx.student.update({
+          where: { id: subscription.studentId },
+          data: { isActive: false, status: 'suspended', deactivatedAt: new Date() },
+        });
+        return { ...subscription, student };
+      }
+
+      return subscription;
+    });
+    logAdminAction(req, 'subscription_deactivated', { subscriptionId: id, studentId: updated.studentId, packageId: updated.packageId });
+    return res.json({ message: 'Student package deactivated', subscription: updated });
+  } catch (error) {
+    console.error('PATCH /api/subscriptions/admin/assignments/:id/deactivate error:', error);
+    return res.status(500).json({ message: 'Failed to deactivate subscription' });
   }
 });
 

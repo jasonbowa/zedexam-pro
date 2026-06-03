@@ -161,6 +161,7 @@ export default function MockExams() {
               {mockExams.map((mock) => {
                 const stats = getMockStats(mock.id);
                 const passed = stats.bestScore >= 50;
+                const locked = Boolean(mock.accessLocked);
 
                 return (
                   <div key={mock.id} style={mockCard}>
@@ -210,14 +211,18 @@ export default function MockExams() {
                         style={{
                           ...statusBadge,
                           background:
-                            stats.attempts === 0
+                            locked
+                              ? "#d97706"
+                              : stats.attempts === 0
                               ? "#334155"
                               : passed
                               ? "#166534"
                               : "#991b1b",
                         }}
                       >
-                        {stats.attempts === 0
+                        {locked
+                          ? "Package Required"
+                          : stats.attempts === 0
                           ? "Not Attempted"
                           : passed
                           ? "Passed"
@@ -225,10 +230,20 @@ export default function MockExams() {
                       </span>
                     </div>
 
+                    {locked ? (
+                      <div style={lockedNotice}>
+                        {mock.accessReason || "Activate or upgrade your package to open this mock exam."}
+                      </div>
+                    ) : null}
+
                     <div style={actionRow}>
-                      <Link to={`/mock-exam/${mock.id}`} style={startButton}>
-                        Start Mock
-                      </Link>
+                      {locked ? (
+                        <Link to="/packages" style={lockedButton}>View Package</Link>
+                      ) : (
+                        <Link to={`/mock-exam/${mock.id}`} style={startButton}>
+                          Start Mock
+                        </Link>
+                      )}
 
                       {stats.latestResultId ? (
                         <Link
@@ -533,6 +548,18 @@ const actionRow = {
   flexWrap: "wrap",
 };
 
+const lockedNotice = {
+  marginTop: "14px",
+  background: "#fffbeb",
+  color: "#92400e",
+  border: "1px solid #fde68a",
+  borderRadius: "14px",
+  padding: "12px",
+  fontSize: "13px",
+  fontWeight: "700",
+  lineHeight: 1.5,
+};
+
 const startButton = {
   flex: 1,
   textAlign: "center",
@@ -543,6 +570,13 @@ const startButton = {
   borderRadius: "12px",
   fontWeight: "800",
   boxShadow: "0 12px 24px rgba(37,99,235,0.22)",
+};
+
+const lockedButton = {
+  ...startButton,
+  background: "#f59e0b",
+  color: "#111827",
+  boxShadow: "0 12px 24px rgba(245,158,11,0.22)",
 };
 
 const resultButton = {

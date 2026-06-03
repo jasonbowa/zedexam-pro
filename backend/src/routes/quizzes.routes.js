@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { requireAuth } = require('../middleware/auth');
-const { getAccessibleSubjectIdsForStudent, ensureStudentCanAccessSubject } = require('../utils/subscriptions');
+const { canStudentAccessTopic, deniedPayload } = require('../utils/accessControl');
 
 function sanitizeQuestionForAttempt(question) {
   return {
@@ -27,20 +27,26 @@ function sanitizeQuestionForAttempt(question) {
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    let where = {};
-    if (!req.user?.isAdmin) {
-      const { subjectIds } = await getAccessibleSubjectIdsForStudent(req.currentStudent);
-      where = subjectIds.length ? { topic: { subjectId: { in: subjectIds } } } : { id: -1 };
-    }
-
     const quizzes = await prisma.quiz.findMany({
-      where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         topic: { select: { id: true, title: true, subjectId: true, subject: { select: { id: true, name: true, grade: true } } } },
         _count: { select: { questions: true, attempts: true } },
       },
     });
+    if (req.user?.role === 'student' && !req.user?.isAdmin) {
+      const decorated = [];
+      for (const quiz of quizzes) {
+        const access = await canStudentAccessTopic(req.user, quiz.topicId || quiz.topic?.id);
+        decorated.push({
+          ...quiz,
+          accessLocked: !access.allowed,
+          accessReason: access.allowed ? null : access.access?.reason || 'This quiz is not available for your current package.',
+        });
+      }
+      return res.json(decorated);
+    }
+
     return res.json(quizzes);
   } catch (error) {
     console.error('GET /api/quizzes error:', error);
@@ -62,10 +68,9 @@ router.get('/:topicId', requireAuth, async (req, res) => {
     });
 
     if (!topic) return res.status(404).json({ message: 'Topic not found' });
-
-    if (!req.user?.isAdmin) {
-      const access = await ensureStudentCanAccessSubject(req.currentStudent, topic.subjectId);
-      if (!access.allowed) return res.status(access.status || 403).json({ message: access.reason });
+    const access = await canStudentAccessTopic(req.user, topicId);
+    if (!access.allowed) {
+      return res.status(403).json(deniedPayload(access.access, access.access?.reason || 'This quiz is not available for your current package.'));
     }
 
     let primaryQuiz = topic.quizzes[0] || null;

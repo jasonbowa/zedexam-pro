@@ -1,8 +1,7 @@
 const requiredVars = ['DATABASE_URL'];
 
-function parseFrontendOrigins(rawValue, nodeEnv) {
-  const fallback = nodeEnv === 'development' ? 'http://localhost:5173' : '';
-  const raw = String(rawValue || fallback);
+function parseFrontendOrigins(rawValue) {
+  const raw = String(rawValue || 'http://localhost:5173');
   return raw
     .split(',')
     .map((item) => item.trim())
@@ -10,16 +9,15 @@ function parseFrontendOrigins(rawValue, nodeEnv) {
 }
 
 function readEnv() {
-  const nodeEnv = process.env.NODE_ENV || 'development';
-  const frontendOrigins = parseFrontendOrigins(process.env.FRONTEND_URL, nodeEnv);
+  const frontendOrigins = parseFrontendOrigins(process.env.FRONTEND_URL);
   const tokenTtl = Number(process.env.TOKEN_TTL_SECONDS);
+  const teacherMaterialsTokenTtl = Number(process.env.TEACHER_MATERIALS_TOKEN_TTL_SECONDS);
   const maxUploadSize = Number(process.env.MAX_UPLOAD_SIZE_MB);
-  const port = Number(process.env.PORT) || 5000;
 
   const config = {
-    NODE_ENV: nodeEnv,
-    PORT: port,
-    FRONTEND_URL: frontendOrigins[0] || '',
+    NODE_ENV: process.env.NODE_ENV || 'development',
+    PORT: Number(process.env.PORT) || 5000,
+    FRONTEND_URL: frontendOrigins[0] || 'http://localhost:5173',
     FRONTEND_URLS: frontendOrigins,
     DATABASE_URL: process.env.DATABASE_URL?.trim() || '',
     ADMIN_EMAIL: (process.env.ADMIN_EMAIL || 'admin@zedexam.com').trim().toLowerCase(),
@@ -27,7 +25,8 @@ function readEnv() {
     ADMIN_NAME: String(process.env.ADMIN_NAME || 'ZedExam Admin').trim(),
     AUTH_SECRET: String(process.env.AUTH_SECRET || 'zedexam-dev-secret-change-me').trim(),
     TOKEN_TTL_SECONDS: Number.isFinite(tokenTtl) && tokenTtl > 0 ? tokenTtl : 60 * 60 * 24 * 7,
-    APP_BASE_URL: String(process.env.APP_BASE_URL || (nodeEnv === 'development' ? `http://localhost:${port}` : '')).trim(),
+    TEACHER_MATERIALS_TOKEN_TTL_SECONDS: Number.isFinite(teacherMaterialsTokenTtl) && teacherMaterialsTokenTtl > 0 ? teacherMaterialsTokenTtl : 60 * 60 * 24 * 7,
+    APP_BASE_URL: String(process.env.APP_BASE_URL || `http://localhost:${Number(process.env.PORT) || 5000}`).trim(),
     UPLOAD_DIR: String(process.env.UPLOAD_DIR || 'uploads').trim(),
     MAX_UPLOAD_SIZE_MB: Number.isFinite(maxUploadSize) && maxUploadSize > 0 ? maxUploadSize : 5,
   };

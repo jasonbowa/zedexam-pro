@@ -22,10 +22,13 @@ function buildAuthPayloadFromToken(token) {
     return null;
   }
 
+  const role = String(signedPayload.role || '').toLowerCase();
+  const isTeacherMaterials = role === 'teacher_materials' || role === 'teacher-materials';
+
   return {
-    id: Number(signedPayload.id),
-    role: signedPayload.role,
-    isAdmin: signedPayload.role === 'admin' || Boolean(signedPayload.isAdmin),
+    id: isTeacherMaterials ? String(signedPayload.id) : Number(signedPayload.id),
+    role,
+    isAdmin: role === 'admin' || Boolean(signedPayload.isAdmin),
   };
 }
 
@@ -50,8 +53,12 @@ async function requireAuth(req, res, next) {
         return res.status(401).json({ message: 'Student account was not found or has been removed' });
       }
 
-      if (student.isActive === false || String(student.status || '').toLowerCase() === 'inactive') {
-        return res.status(403).json({ message: 'Your student account is currently deactivated. Please contact the administrator.' });
+      const accountStatus = String(student.status || '').toLowerCase();
+      if (student.isActive === false || ['inactive', 'pending', 'pending_payment', 'suspended'].includes(accountStatus)) {
+        const message = accountStatus === 'pending_payment' || accountStatus === 'pending'
+          ? 'Your student account is pending payment confirmation. Please contact the administrator after sending proof of payment.'
+          : 'Your student account is currently deactivated. Please contact the administrator.';
+        return res.status(403).json({ message });
       }
 
       req.currentStudent = student;
@@ -71,8 +78,53 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+async function requireTeacherMaterials(req, res, next) {
+  if (!req.user || req.user.role !== 'teacher_materials') {
+    return res.status(401).json({ message: 'Teacher Materials login required' });
+  }
+
+  try {
+    const user = await prisma.teacherMaterialUser.findUnique({ where: { id: String(req.user.id) } });
+    if (!user) {
+      return res.status(401).json({ message: 'Teacher Materials account was not found' });
+    }
+
+    req.currentTeacherMaterialUser = user;
+    return next();
+  } catch (error) {
+    console.error('Teacher materials auth validation error:', error);
+    return res.status(500).json({ message: 'Failed to validate Teacher Materials account' });
+  }
+}
+
+async function requireActiveTeacherMaterials(req, res, next) {
+  await requireTeacherMaterials(req, res, () => {
+    const user = req.currentTeacherMaterialUser;
+    const status = String(user.status || '').toUpperCase();
+    const expiredByDate = user.expiresAt ? new Date(user.expiresAt).getTime() < Date.now() : false;
+
+    if (user.isActive !== true || status !== 'ACTIVE' || expiredByDate) {
+      if (expiredByDate && status === 'ACTIVE') {
+        prisma.teacherMaterialUser.update({
+          where: { id: user.id },
+          data: { status: 'EXPIRED', isActive: false },
+        }).catch(() => null);
+      }
+      return res.status(403).json({
+        message: 'Teacher Materials access is not active yet',
+        status: expiredByDate ? 'EXPIRED' : status || 'PENDING',
+        isActive: false,
+      });
+    }
+
+    return next();
+  });
+}
+
 module.exports = {
   attachAuth,
   requireAuth,
   requireAdmin,
+  requireTeacherMaterials,
+  requireActiveTeacherMaterials,
 };

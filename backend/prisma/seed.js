@@ -3,6 +3,52 @@ const { hashPassword } = require('../src/utils/security');
 
 const prisma = new PrismaClient();
 
+const keySubjects = [
+  ['Mathematics', 'Math revision, worked examples, and exam-style problem solving'],
+  ['Biology', 'Biology notes, diagrams, and exam-style questions'],
+  ['Chemistry', 'Chemistry equations, apparatus, reactions, and calculations'],
+  ['Physics', 'Physics formulas, diagrams, graphs, and structured practice'],
+  ['English', 'English grammar, comprehension, essay planning, and literature notes'],
+  ['Computer Studies / ICT', 'ICT theory, algorithms, flowcharts, and practical exam preparation'],
+  ['Principles of Accounts', 'Accounts ledgers, trial balances, financial statements, and worked calculations'],
+  ['Commerce', 'Commerce case studies, business documents, and trade concepts'],
+  ['History', 'History timelines, source-based questions, and essay guidance'],
+  ['Civic Education', 'Civic rights, responsibilities, governance, and essay-style support'],
+];
+
+const defaultPackages = [
+  {
+    name: 'Student Starter',
+    description: 'Affordable student access for online notes, selected practice, and package-based activation.',
+    durationDays: 30,
+    priceZmw: 50,
+    maxSubjects: 3,
+    maxMockExams: 2,
+    includesReports: false,
+    includesCertificates: true,
+  },
+  {
+    name: 'Student Full Access',
+    description: 'Full student revision package with subjects, notes, quizzes, mock exams, results, and certificates where available.',
+    durationDays: 90,
+    priceZmw: 150,
+    maxSubjects: null,
+    maxMockExams: null,
+    includesReports: true,
+    includesCertificates: true,
+  },
+  {
+    name: 'Teacher Materials',
+    description: 'Teacher-only access to teaching notes, guides, classroom support materials, and downloadable PDFs.',
+    durationDays: 90,
+    priceZmw: 200,
+    maxSubjects: null,
+    maxMockExams: null,
+    includesReports: false,
+    includesCertificates: false,
+  },
+];
+
 async function ensureTopicWithQuiz(subject, title, description) {
   let topic = await prisma.topic.findFirst({
     where: { title, subjectId: subject.id },
@@ -96,6 +142,26 @@ async function main() {
       create: { name: 'Combined Science', description: 'Science revision and mock exams', grade: GradeLevel.FORM_4 },
     }),
   ]);
+
+  await Promise.all(
+    keySubjects.map(([name, description]) =>
+      prisma.subject.upsert({
+        where: { name_grade: { name, grade: GradeLevel.FORM_4 } },
+        update: { description },
+        create: { name, description, grade: GradeLevel.FORM_4 },
+      })
+    )
+  );
+
+  await Promise.all(
+    defaultPackages.map((pkg) =>
+      prisma.subscriptionPackage.upsert({
+        where: { name: pkg.name },
+        update: { ...pkg, active: true },
+        create: { ...pkg, active: true },
+      })
+    )
+  );
 
   const ict = await ensureTopicWithQuiz(ictSubject, 'Computer Fundamentals', 'Introduction to computers and common hardware');
   const maths = await ensureTopicWithQuiz(mathSubject, 'Quadratic Equations', 'Solving and interpreting quadratic equations');

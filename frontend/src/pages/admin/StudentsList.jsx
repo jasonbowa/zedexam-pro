@@ -37,10 +37,28 @@ function formatDate(value) {
 
 function normalizeStudentStatus(student) {
   if (!student) return 'unknown';
-  if (student.status) return String(student.status).toLowerCase();
   if (student.deletedAt) return 'deleted';
+  const status = String(student.status || '').toLowerCase();
+  if (status === 'pending' || status === 'pending_payment') return 'pending_payment';
+  if (status === 'suspended') return 'suspended';
   if (student.isActive === false) return 'inactive';
   return 'active';
+}
+
+function studentStatusLabel(status) {
+  if (status === 'pending_payment') return 'Pending Payment';
+  if (status === 'suspended') return 'Suspended';
+  if (status === 'active') return 'Active';
+  if (status === 'inactive') return 'Inactive';
+  if (status === 'deleted') return 'Removed';
+  return 'Unknown';
+}
+
+function studentStatusBadge(status) {
+  if (status === 'active') return 'badge-success';
+  if (status === 'pending_payment') return 'badge-warning';
+  if (status === 'inactive' || status === 'suspended') return 'bg-red-100 text-red-700';
+  return 'badge-danger';
 }
 
 export default function StudentsList() {
@@ -99,9 +117,10 @@ export default function StudentsList() {
   const stats = useMemo(() => {
     const total = students.length;
     const active = students.filter((student) => normalizeStudentStatus(student) === 'active').length;
-    const inactive = students.filter((student) => normalizeStudentStatus(student) === 'inactive').length;
+    const pending = students.filter((student) => normalizeStudentStatus(student) === 'pending_payment').length;
+    const suspended = students.filter((student) => ['inactive', 'suspended'].includes(normalizeStudentStatus(student))).length;
     const deleted = students.filter((student) => normalizeStudentStatus(student) === 'deleted').length;
-    return { total, active, inactive, deleted };
+    return { total, active, pending, suspended, deleted };
   }, [students]);
 
   const updateForm = (key, value) => {
@@ -276,10 +295,11 @@ export default function StudentsList() {
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {success ? <Notice tone="success">{success}</Notice> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Total Students" value={loading ? '...' : stats.total} hint="Including removed accounts" accent="slate" />
         <StatCard label="Active" value={loading ? '...' : stats.active} hint="Can log in" accent="emerald" />
-        <StatCard label="Inactive" value={loading ? '...' : stats.inactive} hint="Needs reactivation" accent="amber" />
+        <StatCard label="Pending Payment" value={loading ? '...' : stats.pending} hint="Needs activation" accent="amber" />
+        <StatCard label="Suspended" value={loading ? '...' : stats.suspended} hint="Cannot log in" accent="white" />
         <StatCard label="Removed" value={loading ? '...' : stats.deleted} hint="Can be restored" accent="white" />
       </div>
 
@@ -369,7 +389,9 @@ export default function StudentsList() {
             <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All statuses</option>
               <option value="active">Active</option>
+              <option value="pending_payment">Pending Payment</option>
               <option value="inactive">Inactive</option>
+              <option value="suspended">Suspended</option>
               <option value="deleted">Removed</option>
             </select>
           </div>
@@ -424,14 +446,8 @@ export default function StudentsList() {
                       <td className="px-4 py-4 text-slate-700">{formatGrade(student.grade)}</td>
                       <td className="px-4 py-4 text-slate-700">{student.school || '—'}</td>
                       <td className="px-4 py-4">
-                        <span className={`badge ${
-                          status === 'active'
-                            ? 'badge-success'
-                            : status === 'inactive'
-                              ? 'badge-warning'
-                              : 'badge-danger'
-                        }`}>
-                          {status === 'active' ? 'Active' : status === 'inactive' ? 'Inactive' : 'Removed'}
+                        <span className={`badge ${studentStatusBadge(status)}`}>
+                          {studentStatusLabel(status)}
                         </span>
                       </td>
                       <td className="px-4 py-4 text-slate-600">
@@ -449,7 +465,7 @@ export default function StudentsList() {
                             </button>
                           ) : null}
 
-                          {status === 'inactive' ? (
+                          {['inactive', 'pending_payment', 'suspended'].includes(status) ? (
                             <button className="btn btn-success" onClick={() => handleActivate(student)} disabled={busy}>
                               {busy ? 'Working...' : 'Activate'}
                             </button>

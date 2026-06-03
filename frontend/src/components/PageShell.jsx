@@ -1,10 +1,12 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { clearStoredUsers, getStoredUser, isAdminUser } from '../lib/auth';
+import { clearStoredUsers, getStoredUser, isAdminUser, isTeacherMaterialsUser } from '../lib/auth';
 
 const studentNav = [
   { label: 'Dashboard', to: '/dashboard' },
   { label: 'Subjects', to: '/subjects' },
+  { label: 'Online Notes', to: '/notes' },
   { label: 'Mock Exams', to: '/mock-exams' },
+  { label: 'Packages', to: '/packages' },
 ];
 
 const adminNav = [
@@ -15,6 +17,20 @@ const adminNav = [
   { label: 'Bulk Upload', to: '/admin/bulk-upload' },
   { label: 'Mock Builder', to: '/admin/mock-builder' },
   { label: 'Students', to: '/admin/students' },
+  { label: 'Payment Queue', to: '/admin/payments' },
+  { label: 'Audit Logs', to: '/admin/audit-logs' },
+  { label: 'Data Exports', to: '/admin/exports' },
+  { label: 'Notes & Materials', to: '/admin/materials' },
+  { label: 'Packages', to: '/admin/packages' },
+  { label: 'Subscriptions', to: '/admin/subscriptions' },
+  { label: 'Teacher Materials', to: '/admin/teacher-materials' },
+];
+
+const teacherNav = [
+  { label: 'Dashboard', to: '/teacher/dashboard' },
+  { label: 'Teacher Notes', to: '/teacher/notes' },
+  { label: 'Teacher Guides', to: '/teacher/guides' },
+  { label: 'Downloads', to: '/teacher/downloads' },
 ];
 
 export default function PageShell({ title, subtitle, action, children }) {
@@ -22,27 +38,28 @@ export default function PageShell({ title, subtitle, action, children }) {
   const navigate = useNavigate();
   const user = getStoredUser();
   const admin = isAdminUser(user);
-  const nav = admin ? adminNav : studentNav;
+  const teacherMaterials = isTeacherMaterialsUser(user);
+  const nav = admin ? adminNav : teacherMaterials ? teacherNav : studentNav;
 
   const logout = () => {
     clearStoredUsers();
-    navigate('/login');
+    navigate(teacherMaterials ? '/teacher/login' : '/login');
   };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_28%),linear-gradient(180deg,#f8fafc_0%,#eef2ff_100%)]">
       <header className="sticky top-0 z-20 border-b border-white/70 bg-white/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <button onClick={() => navigate(admin ? '/admin' : '/dashboard')} className="text-left">
+          <button onClick={() => navigate(admin ? '/admin' : teacherMaterials ? '/teacher/dashboard' : '/dashboard')} className="text-left">
             <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-blue-600">Launch Edition</p>
             <h1 className="text-2xl font-black tracking-tight text-slate-950">ZedExam Pro</h1>
-            <p className="text-sm text-slate-500">Professional exam preparation for real ECZ readiness.</p>
+            <p className="text-sm text-slate-500">{teacherMaterials ? 'CBC-aligned teaching materials and exam-style classroom support.' : 'Professional exam preparation and practice support.'}</p>
           </button>
 
           <div className="hidden items-center gap-3 md:flex">
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-right shadow-sm">
-              <p className="text-sm font-semibold text-slate-800">{user?.name || (admin ? 'Administrator' : 'Student')}</p>
-              <p className="text-xs text-slate-500">{user?.email || user?.phone || (admin ? 'Admin access' : 'Learner access')}</p>
+              <p className="text-sm font-semibold text-slate-800">{user?.name || (admin ? 'Administrator' : teacherMaterials ? 'Teacher' : 'Student')}</p>
+              <p className="text-xs text-slate-500">{user?.email || user?.phone || (admin ? 'Admin access' : teacherMaterials ? 'Teacher Materials access' : 'Learner access')}</p>
             </div>
             <button onClick={logout} className="btn btn-danger">Logout</button>
           </div>
@@ -53,17 +70,19 @@ export default function PageShell({ title, subtitle, action, children }) {
         <aside className="card h-fit overflow-hidden p-4">
           <div className="mb-4 rounded-[24px] bg-gradient-to-br from-slate-950 via-slate-900 to-blue-900 p-5 text-white">
             <p className="text-xs uppercase tracking-[0.25em] text-blue-200">Workspace</p>
-            <p className="mt-2 text-lg font-bold">{admin ? 'Admin control' : 'Student learning'}</p>
+            <p className="mt-2 text-lg font-bold">{admin ? 'Admin control' : teacherMaterials ? 'Teacher materials' : 'Student learning'}</p>
             <p className="mt-2 text-sm text-slate-200">
               {admin
                 ? 'Manage content, students, and exam readiness from one place.'
+                : teacherMaterials
+                ? 'Access teaching notes, guides, and downloadable classroom materials.'
                 : 'Move from subjects to results and certificates with a cleaner workflow.'}
             </p>
           </div>
 
           <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:hidden">
-            <p className="text-sm font-semibold text-slate-800">{user?.name || (admin ? 'Administrator' : 'Student')}</p>
-            <p className="mt-1 text-xs text-slate-500">{user?.email || user?.phone || (admin ? 'Admin access' : 'Learner access')}</p>
+            <p className="text-sm font-semibold text-slate-800">{user?.name || (admin ? 'Administrator' : teacherMaterials ? 'Teacher' : 'Student')}</p>
+            <p className="mt-1 text-xs text-slate-500">{user?.email || user?.phone || (admin ? 'Admin access' : teacherMaterials ? 'Teacher Materials access' : 'Learner access')}</p>
             <button onClick={logout} className="btn btn-danger mt-3 w-full">Logout</button>
           </div>
 

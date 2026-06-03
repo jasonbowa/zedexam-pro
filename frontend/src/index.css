@@ -52,6 +52,20 @@ input,
 select,
 textarea {
   min-height: 48px;
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8;
+  opacity: 1;
+}
+
+select option {
+  background: #ffffff;
+  color: #0f172a;
 }
 
 input:focus,

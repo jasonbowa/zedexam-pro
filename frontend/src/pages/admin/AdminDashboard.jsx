@@ -108,10 +108,15 @@ export default function AdminDashboard() {
               ['Bulk Upload', 'Import questions faster in batches.', '/admin/bulk-upload'],
               ['Mock Builder', 'Assemble timed mock exams.', '/admin/mock-builder'],
               ['Students List', 'Review registered learners.', '/admin/students'],
+              ['Payment Queue', 'Confirm Mobile Money payments and activate access.', '/admin/payments'],
+              ['Audit Logs', 'Review payment, content, login, export, and password reset activity.', '/admin/audit-logs'],
+              ['Data Exports', 'Download safe CSV backups for users, payments, packages, and materials.', '/admin/exports'],
+              ['Notes & Materials', 'Publish online notes, diagrams, PDFs, and teacher guides.', '/admin/materials'],
               ['Manage Schools', 'Create school partner records.', '/admin/schools'],
               ['Manage Teachers', 'Maintain teacher onboarding records.', '/admin/teachers'],
               ['Manage Packages', 'Build pricing and access plans.', '/admin/packages'],
               ['Subscriptions', 'Assign packages to students.', '/admin/subscriptions'],
+              ['Teacher Materials', 'Activate teacher access and publish notes or guides.', '/admin/teacher-materials'],
             ].map(([title, description, link]) => (
               <Link key={link} to={link} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
                 <h3 className="text-lg font-bold text-slate-950">{title}</h3>

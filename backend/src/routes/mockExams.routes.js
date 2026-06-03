@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const { requireAdmin, requireAuth } = require('../middleware/auth');
-const { listAccessibleMockExamsForStudent, ensureStudentCanAccessMockExam, ensureStudentCanAccessSubject } = require('../utils/subscriptions');
+const { canStudentAccessMockExam, deniedPayload } = require('../utils/accessControl');
 
 function sanitizeQuestionForAttempt(question) {
   return {
@@ -27,11 +27,17 @@ function sanitizeQuestionForAttempt(question) {
 
 function flattenQuestionLink(link) {
   const question = link?.question || link;
-  return { ...sanitizeQuestionForAttempt(question), linkId: link?.id || null };
+  return {
+    ...sanitizeQuestionForAttempt(question),
+    linkId: link?.id || null,
+  };
 }
 
 function decorateMockExam(exam) {
-  const flattenedQuestions = Array.isArray(exam.questions) ? exam.questions.map(flattenQuestionLink) : [];
+  const flattenedQuestions = Array.isArray(exam.questions)
+    ? exam.questions.map(flattenQuestionLink)
+    : [];
+
   return {
     ...exam,
     duration: exam.durationMinutes,
@@ -44,23 +50,27 @@ function decorateMockExam(exam) {
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const include = {
-      subject: { select: { id: true, name: true, grade: true } },
-      topic: { select: { id: true, title: true } },
-      questions: { include: { question: true } },
-    };
-
-    if (!req.user?.isAdmin) {
-      const { mockExams, capabilities } = await listAccessibleMockExamsForStudent(req.currentStudent, { include });
-      return res.json(mockExams.map((exam) => ({ ...decorateMockExam(exam), accessPlan: capabilities.planName })));
-    }
-
     const mockExams = await prisma.mockExam.findMany({
       orderBy: { createdAt: 'desc' },
-      include,
+      include: {
+        subject: { select: { id: true, name: true, grade: true } },
+        topic: { select: { id: true, title: true } },
+        questions: {
+          include: { question: true },
+        },
+      },
     });
 
-    return res.json(mockExams.map(decorateMockExam));
+    const decorated = [];
+    for (const exam of mockExams) {
+      const access = await canStudentAccessMockExam(req.user, exam);
+      decorated.push({
+        ...decorateMockExam(exam),
+        accessLocked: !access.allowed,
+        accessReason: access.allowed ? null : access.access?.reason || 'This mock exam is not available for your current package.',
+      });
+    }
+    return res.json(decorated);
   } catch (error) {
     console.error('GET /api/mock-exams error:', error);
     return res.status(500).json({ message: 'Failed to fetch mock exams' });
@@ -74,24 +84,6 @@ router.get('/topic/:topicId', requireAuth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid topic ID' });
     }
 
-    const topic = await prisma.topic.findUnique({ where: { id: topicId }, include: { subject: true } });
-    if (!topic) return res.status(404).json({ message: 'Topic not found' });
-
-    if (!req.user?.isAdmin) {
-      const subjectAccess = await ensureStudentCanAccessSubject(req.currentStudent, topic.subjectId);
-      if (!subjectAccess.allowed) return res.status(subjectAccess.status || 403).json({ message: subjectAccess.reason });
-
-      const { mockExams } = await listAccessibleMockExamsForStudent(req.currentStudent, {
-        where: { topicId },
-        include: {
-          subject: { select: { id: true, name: true, grade: true } },
-          topic: { select: { id: true, title: true } },
-          questions: { include: { question: true } },
-        },
-      });
-      return res.json(mockExams.map(decorateMockExam));
-    }
-
     const mockExams = await prisma.mockExam.findMany({
       where: { topicId },
       orderBy: { createdAt: 'desc' },
@@ -102,7 +94,16 @@ router.get('/topic/:topicId', requireAuth, async (req, res) => {
       },
     });
 
-    return res.json(mockExams.map(decorateMockExam));
+    const decorated = [];
+    for (const exam of mockExams) {
+      const access = await canStudentAccessMockExam(req.user, exam);
+      decorated.push({
+        ...decorateMockExam(exam),
+        accessLocked: !access.allowed,
+        accessReason: access.allowed ? null : access.access?.reason || 'This mock exam is not available for your current package.',
+      });
+    }
+    return res.json(decorated);
   } catch (error) {
     console.error('GET /api/mock-exams/topic/:topicId error:', error);
     return res.status(500).json({ message: 'Failed to fetch mock exams' });
@@ -116,22 +117,24 @@ router.get('/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid mock exam ID' });
     }
 
-    if (!req.user?.isAdmin) {
-      const access = await ensureStudentCanAccessMockExam(req.currentStudent, id);
-      if (!access.allowed) return res.status(access.status || 403).json({ message: access.reason });
-    }
-
     const mockExam = await prisma.mockExam.findUnique({
       where: { id },
       include: {
         subject: true,
         topic: true,
-        questions: { include: { question: true }, orderBy: { id: 'asc' } },
+        questions: {
+          include: { question: true },
+          orderBy: { id: 'asc' },
+        },
       },
     });
 
     if (!mockExam) {
       return res.status(404).json({ message: 'Mock exam not found' });
+    }
+    const access = await canStudentAccessMockExam(req.user, mockExam);
+    if (!access.allowed) {
+      return res.status(403).json(deniedPayload(access.access, access.access?.reason || 'This mock exam is not available for your current package.'));
     }
 
     return res.json(decorateMockExam(mockExam));
@@ -184,7 +187,9 @@ router.post('/', requireAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Some selected questions do not exist' });
     }
 
-    const invalidQuestion = existingQuestions.find((item) => item.topicId !== parsedTopicId && item.quiz?.topicId !== parsedTopicId);
+    const invalidQuestion = existingQuestions.find(
+      (item) => item.topicId !== parsedTopicId && item.quiz?.topicId !== parsedTopicId
+    );
     if (invalidQuestion) {
       return res.status(400).json({ message: 'All selected questions must belong to the chosen topic' });
     }
@@ -196,7 +201,9 @@ router.post('/', requireAdmin, async (req, res) => {
         durationMinutes: parsedDuration,
         subjectId: parsedSubjectId,
         topicId: parsedTopicId,
-        questions: { create: normalizedQuestionIds.map((questionId) => ({ questionId })) },
+        questions: {
+          create: normalizedQuestionIds.map((questionId) => ({ questionId })),
+        },
       },
       include: {
         subject: { select: { id: true, name: true, grade: true } },
@@ -205,7 +212,10 @@ router.post('/', requireAdmin, async (req, res) => {
       },
     });
 
-    return res.status(201).json({ message: 'Mock exam created successfully', mockExam: decorateMockExam(mockExam) });
+    return res.status(201).json({
+      message: 'Mock exam created successfully',
+      mockExam: decorateMockExam(mockExam),
+    });
   } catch (error) {
     console.error('POST /api/mock-exams error:', error);
     return res.status(500).json({ message: 'Failed to create mock exam' });

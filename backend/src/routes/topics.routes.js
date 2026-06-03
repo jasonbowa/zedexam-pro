@@ -1,18 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { ensureStudentCanAccessSubject } = require('../utils/subscriptions');
+const { requireAdmin } = require('../middleware/auth');
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const subjectId = req.query.subjectId ? Number(req.query.subjectId) : null;
     const where = subjectId && !Number.isNaN(subjectId) ? { subjectId } : {};
-
-    if (!req.user?.isAdmin && subjectId) {
-      const access = await ensureStudentCanAccessSubject(req.currentStudent, subjectId);
-      if (!access.allowed) return res.status(access.status || 403).json({ message: access.reason });
-    }
 
     const topics = await prisma.topic.findMany({
       where,
@@ -30,22 +24,19 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/subject/:subjectId', requireAuth, async (req, res) => {
+router.get('/subject/:subjectId', async (req, res) => {
   try {
     const subjectId = Number(req.params.subjectId);
     if (Number.isNaN(subjectId)) {
       return res.status(400).json({ message: 'Invalid subject ID' });
     }
 
-    if (!req.user?.isAdmin) {
-      const access = await ensureStudentCanAccessSubject(req.currentStudent, subjectId);
-      if (!access.allowed) return res.status(access.status || 403).json({ message: access.reason });
-    }
-
     const topics = await prisma.topic.findMany({
       where: { subjectId },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      include: { _count: { select: { quizzes: true, questions: true, mockExams: true } } },
+      include: {
+        _count: { select: { quizzes: true, questions: true, mockExams: true } },
+      },
     });
 
     return res.json(topics);
@@ -55,7 +46,7 @@ router.get('/subject/:subjectId', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) {
@@ -72,11 +63,6 @@ router.get('/:id', requireAuth, async (req, res) => {
 
     if (!topic) {
       return res.status(404).json({ message: 'Topic not found' });
-    }
-
-    if (!req.user?.isAdmin) {
-      const access = await ensureStudentCanAccessSubject(req.currentStudent, topic.subjectId);
-      if (!access.allowed) return res.status(access.status || 403).json({ message: access.reason });
     }
 
     return res.json(topic);
@@ -101,7 +87,10 @@ router.post('/', requireAdmin, async (req, res) => {
       return res.status(404).json({ message: 'Subject not found' });
     }
 
-    const existing = await prisma.topic.findFirst({ where: { title: trimmedTitle, subjectId: parsedSubjectId } });
+    const existing = await prisma.topic.findFirst({
+      where: { title: trimmedTitle, subjectId: parsedSubjectId },
+    });
+
     if (existing) {
       return res.status(409).json({ message: 'Topic already exists for this subject' });
     }
@@ -114,8 +103,18 @@ router.post('/', requireAdmin, async (req, res) => {
       },
     });
 
-    const quiz = await prisma.quiz.create({ data: { title: `${trimmedTitle} Quiz`, topicId: topic.id } });
-    return res.status(201).json({ message: 'Topic created successfully', topic, quiz });
+    const quiz = await prisma.quiz.create({
+      data: {
+        title: `${trimmedTitle} Quiz`,
+        topicId: topic.id,
+      },
+    });
+
+    return res.status(201).json({
+      message: 'Topic created successfully',
+      topic,
+      quiz,
+    });
   } catch (error) {
     console.error('POST /api/topics error:', error);
     return res.status(500).json({ message: 'Failed to create topic' });

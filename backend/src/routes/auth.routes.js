@@ -20,6 +20,7 @@ const {
   signToken,
 } = require('../utils/security');
 const { appendAuditLog } = require('../utils/audit');
+const { getPaymentInstructions } = require('../utils/payment');
 
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' });
 const registerLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'auth-register' });
@@ -110,16 +111,20 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid email/phone or password' });
     }
 
-    if (student.isActive === false || String(student.status || '').toLowerCase() === 'inactive') {
-      appendAuditLog('student_login_blocked_inactive', { actorId: student.id, identifier: rawIdentifier.slice(0, 80), ip: req.ip });
-      return res.status(403).json({ message: 'This student account is deactivated. Please contact the administrator.' });
+    const accountStatus = String(student.status || '').toLowerCase();
+    if (student.isActive === false || ['inactive', 'pending', 'pending_payment', 'suspended'].includes(accountStatus)) {
+      appendAuditLog('student_login_blocked_inactive', { actorId: student.id, identifier: rawIdentifier.slice(0, 80), status: accountStatus, ip: req.ip });
+      const message = accountStatus === 'pending_payment' || accountStatus === 'pending'
+        ? 'Your account is pending payment confirmation. Please contact the administrator after sending proof of payment.'
+        : 'This student account is deactivated. Please contact the administrator.';
+      return res.status(403).json({ message });
     }
 
     const normalizedPhone = normalizePhoneNumber(student.phoneNumber);
     const studentUpdates = { lastLoginAt: new Date() };
     if (shouldUpgradePasswordHash(student.password)) studentUpdates.password = hashPassword(providedPassword);
     if (normalizedPhone && normalizedPhone !== student.phoneNumber) studentUpdates.phoneNumber = normalizedPhone;
-    if (!student.status || String(student.status).toLowerCase() === 'pending') studentUpdates.status = 'active';
+    if (!student.status) studentUpdates.status = 'active';
 
     const safeStudent = await prisma.student.update({ where: { id: student.id }, data: studentUpdates });
 
@@ -137,7 +142,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
 router.post('/register', registerLimiter, async (req, res) => {
   try {
-    const { name, email, phoneNumber, phone, password, grade, school, schoolId } = req.body;
+    const { name, email, phoneNumber, phone, password, grade, school, schoolId, packageId, selectedPackageId, selectedPackage, packageName } = req.body;
 
     const trimmedName = String(name || '').trim();
     const normalizedEmail = normalizeEmail(email);
@@ -145,6 +150,8 @@ router.post('/register', registerLimiter, async (req, res) => {
     const trimmedPassword = String(password || '').trim();
     const normalizedGrade = normalizeGrade(grade);
     const trimmedSchool = String(school || '').trim() || null;
+    const parsedPackageId = Number(packageId || selectedPackageId);
+    const requestedPackageName = String(selectedPackage || packageName || '').trim();
 
     if (!trimmedName || !normalizedPhone || !trimmedPassword || !normalizedGrade) {
       return res.status(400).json({
@@ -173,6 +180,21 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(400).json({ message: schoolResolution.error });
     }
 
+    let selectedPlan = null;
+    if (parsedPackageId && !Number.isNaN(parsedPackageId)) {
+      selectedPlan = await prisma.subscriptionPackage.findFirst({
+        where: { id: parsedPackageId, active: true },
+      });
+    } else if (requestedPackageName) {
+      selectedPlan = await prisma.subscriptionPackage.findFirst({
+        where: { name: requestedPackageName, active: true },
+      });
+    }
+
+    if (!selectedPlan) {
+      return res.status(400).json({ message: 'Please select a valid student package before creating the account.' });
+    }
+
     const existingStudent = await prisma.student.findFirst({
       where: {
         OR: [
@@ -190,29 +212,83 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(409).json({ message: 'This student record already exists in the system and was previously removed. Restore it from admin instead of registering again.' });
     }
 
-    const student = await prisma.student.create({
-      data: {
-        name: trimmedName,
-        email: normalizedEmail,
-        phoneNumber: normalizedPhone,
-        password: hashPassword(trimmedPassword),
-        grade: normalizedGrade,
-        school: schoolResolution.schoolName || trimmedSchool,
-        schoolId: schoolResolution.schoolId,
-        status: 'active',
-        isActive: true,
-      },
+    const { student, subscription } = await prisma.$transaction(async (tx) => {
+      const createdStudent = await tx.student.create({
+        data: {
+          name: trimmedName,
+          email: normalizedEmail,
+          phoneNumber: normalizedPhone,
+          password: hashPassword(trimmedPassword),
+          grade: normalizedGrade,
+          school: schoolResolution.schoolName || trimmedSchool,
+          schoolId: schoolResolution.schoolId,
+          status: 'pending_payment',
+          isActive: false,
+        },
+      });
+
+      const paymentReference = `STUDENT-${createdStudent.id}`;
+      const createdSubscription = await tx.studentSubscription.create({
+        data: {
+          studentId: createdStudent.id,
+          packageId: selectedPlan.id,
+          schoolId: schoolResolution.schoolId,
+          status: 'PENDING',
+          proofStatus: 'PENDING',
+          paymentReference,
+          notes: `Created during student registration. Pending manual payment confirmation. Reference: ${paymentReference}.`,
+        },
+        include: { package: true, school: true },
+      });
+
+      return { student: createdStudent, subscription: createdSubscription };
     });
 
-    appendAuditLog('student_registered', { actorId: student.id, ip: req.ip, grade: normalizedGrade });
+    appendAuditLog('student_registered', { actorId: student.id, ip: req.ip, grade: normalizedGrade, packageId: selectedPlan.id });
     return res.status(201).json({
-      message: 'Student registered successfully',
-      token: buildStudentToken(student),
+      message: 'Student registered successfully. Account is pending until payment confirmation and admin activation.',
       user: { ...toPublicStudent(student), role: 'student', isAdmin: false },
+      subscription,
+      activationReference: subscription.paymentReference,
+      paymentInstructions: getPaymentInstructions(),
     });
   } catch (error) {
     console.error('POST /api/auth/register error:', error);
     return res.status(500).json({ message: 'Failed to register student' });
+  }
+});
+
+router.post('/change-password', requireAuth, async (req, res) => {
+  try {
+    if (req.user?.isAdmin) {
+      return res.status(400).json({ message: 'Use the admin account settings process for administrator passwords.' });
+    }
+
+    const currentPassword = String(req.body.currentPassword || '').trim();
+    const nextPassword = String(req.body.newPassword || req.body.password || '').trim();
+    if (!currentPassword || !nextPassword) {
+      return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+    if (nextPassword.length < 6) {
+      return res.status(400).json({ message: 'New password must be at least 6 characters long' });
+    }
+
+    const student = req.currentStudent || await prisma.student.findUnique({ where: { id: Number(req.user.id) } });
+    if (!student || student.deletedAt) return res.status(404).json({ message: 'Student account was not found' });
+    if (!verifyPassword(currentPassword, student.password)) {
+      appendAuditLog('student_password_change_failed', { actorId: student.id, ip: req.ip });
+      return res.status(401).json({ message: 'Current password is incorrect' });
+    }
+
+    await prisma.student.update({
+      where: { id: student.id },
+      data: { password: hashPassword(nextPassword) },
+    });
+    appendAuditLog('student_password_changed', { actorId: student.id, ip: req.ip });
+    return res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('POST /api/auth/change-password error:', error);
+    return res.status(500).json({ message: 'Failed to change password' });
   }
 });
 

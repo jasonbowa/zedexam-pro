@@ -1,8 +1,6 @@
 import { Navigate, Route, Routes, Link } from "react-router-dom";
 
 import Login from "./pages/Login";
-import Register from "./pages/Register";
-import AdminLogin from "./pages/AdminLogin";
 import Dashboard from "./pages/Dashboard";
 import Subjects from "./pages/Subjects";
 import SubjectDetails from "./pages/SubjectDetails";
@@ -11,6 +9,11 @@ import ResultsPage from "./pages/ResultsPage";
 import Certificate from "./pages/Certificate";
 import MockExams from "./pages/MockExams";
 import MockExamRunner from "./pages/MockExamRunner";
+import PackagePayment from "./pages/PackagePayment";
+import StudentNotes from "./pages/StudentNotes";
+import TeacherAuth from "./pages/teacher/TeacherAuth";
+import TeacherDashboard from "./pages/teacher/TeacherDashboard";
+import TeacherMaterialsList from "./pages/teacher/TeacherMaterialsList";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import ManageSubjects from "./pages/admin/ManageSubjects";
@@ -23,6 +26,11 @@ import ManageSchools from "./pages/admin/ManageSchools";
 import ManageTeachers from "./pages/admin/ManageTeachers";
 import ManagePackages from "./pages/admin/ManagePackages";
 import StudentSubscriptions from "./pages/admin/StudentSubscriptions";
+import PaymentQueue from "./pages/admin/PaymentQueue";
+import DataExport from "./pages/admin/DataExport";
+import AuditLogs from "./pages/admin/AuditLogs";
+import TeacherMaterialsAdmin from "./pages/admin/TeacherMaterialsAdmin";
+import ContentMaterialsAdmin from "./pages/admin/ContentMaterialsAdmin";
 
 import { getStoredUser, getToken, isTokenExpired, clearAuth } from "./api";
 
@@ -39,6 +47,10 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace />;
   }
 
+  if (user.role === "teacher_materials" || user.role === "teacher-materials") {
+    return <Navigate to="/teacher/dashboard" replace />;
+  }
+
   return children;
 }
 
@@ -48,7 +60,8 @@ function PublicRoute({ children }) {
 
   if (token && user && !isTokenExpired(token)) {
     const isAdmin = user.role === "admin" || user.isAdmin === true;
-    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
+    const isTeacherMaterials = user.role === "teacher_materials" || user.role === "teacher-materials";
+    return <Navigate to={isAdmin ? "/admin" : isTeacherMaterials ? "/teacher/dashboard" : "/dashboard"} replace />;
   }
 
   return children;
@@ -70,7 +83,30 @@ function AdminRoute({ children }) {
   const isAdmin = user.role === "admin" || user.isAdmin === true;
 
   if (!isAdmin) {
-    return <Navigate to="/dashboard" replace />;
+    const isTeacherMaterials = user.role === "teacher_materials" || user.role === "teacher-materials";
+    return <Navigate to={isTeacherMaterials ? "/teacher/dashboard" : "/dashboard"} replace />;
+  }
+
+  return children;
+}
+
+function TeacherRoute({ children }) {
+  const token = getToken();
+  const user = getStoredUser();
+
+  if (!token || !user) {
+    return <Navigate to="/teacher/login" replace />;
+  }
+
+  if (isTokenExpired(token)) {
+    clearAuth();
+    return <Navigate to="/teacher/login" replace />;
+  }
+
+  const isTeacherMaterials = user.role === "teacher_materials" || user.role === "teacher-materials";
+  if (!isTeacherMaterials) {
+    const isAdmin = user.role === "admin" || user.isAdmin === true;
+    return <Navigate to={isAdmin ? "/admin" : "/dashboard"} replace />;
   }
 
   return children;
@@ -195,15 +231,6 @@ export default function App() {
   return (
     <Routes>
       <Route
-        path="/"
-        element={
-          <PublicRoute>
-            <Login />
-          </PublicRoute>
-        }
-      />
-
-      <Route
         path="/login"
         element={
           <PublicRoute>
@@ -213,20 +240,83 @@ export default function App() {
       />
 
       <Route
-        path="/register"
+        path="/admin/login"
         element={
           <PublicRoute>
-            <Register />
+            <Login initialMode="admin-login" />
           </PublicRoute>
         }
       />
 
       <Route
-        path="/admin-login"
+        path="/teacher/login"
         element={
           <PublicRoute>
-            <AdminLogin />
+            <TeacherAuth mode="login" />
           </PublicRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/register"
+        element={
+          <PublicRoute>
+            <TeacherAuth mode="register" />
+          </PublicRoute>
+        }
+      />
+
+      <Route
+        path="/teacher"
+        element={
+          <TeacherRoute>
+            <Navigate to="/teacher/dashboard" replace />
+          </TeacherRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/dashboard"
+        element={
+          <TeacherRoute>
+            <TeacherDashboard />
+          </TeacherRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/notes"
+        element={
+          <TeacherRoute>
+            <TeacherMaterialsList type="notes" />
+          </TeacherRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/guides"
+        element={
+          <TeacherRoute>
+            <TeacherMaterialsList type="guides" />
+          </TeacherRoute>
+        }
+      />
+
+      <Route
+        path="/teacher/downloads"
+        element={
+          <TeacherRoute>
+            <TeacherMaterialsList type="downloads" />
+          </TeacherRoute>
+        }
+      />
+
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Navigate to="/dashboard" replace />
+          </ProtectedRoute>
         }
       />
 
@@ -298,6 +388,24 @@ export default function App() {
         element={
           <ProtectedRoute>
             <MockExamRunner />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/notes"
+        element={
+          <ProtectedRoute>
+            <StudentNotes />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/packages"
+        element={
+          <ProtectedRoute>
+            <PackagePayment />
           </ProtectedRoute>
         }
       />
@@ -397,6 +505,51 @@ export default function App() {
         element={
           <AdminRoute>
             <StudentSubscriptions />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/payments"
+        element={
+          <AdminRoute>
+            <PaymentQueue />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/exports"
+        element={
+          <AdminRoute>
+            <DataExport />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/audit-logs"
+        element={
+          <AdminRoute>
+            <AuditLogs />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/teacher-materials"
+        element={
+          <AdminRoute>
+            <TeacherMaterialsAdmin />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/materials"
+        element={
+          <AdminRoute>
+            <ContentMaterialsAdmin />
           </AdminRoute>
         }
       />

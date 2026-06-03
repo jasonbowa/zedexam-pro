@@ -13,11 +13,17 @@ const {
   normalizeQuestionType,
 } = require('../utils/normalizers');
 const { hashPassword, verifyPassword, shouldUpgradePasswordHash, signToken } = require('../utils/security');
-const { toPublicAdmin, toPublicStudent } = require('../utils/serializers');
+const { toPublicAdmin, toPublicStudent, toPublicTeacherMaterialUser } = require('../utils/serializers');
 const { logAdminAction, readAuditLog, appendAuditLog } = require('../utils/audit');
+const { getTeacherExpiryDate, resolveTeacherPackage } = require('../utils/accessControl');
 
 const adminLoginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'admin-login' });
 const adminWriteLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 40, keyPrefix: 'admin-write' });
+const TEACHER_MATERIAL_ACCESS_STATUSES = ['PENDING', 'ACTIVE', 'EXPIRED', 'INACTIVE'];
+const TEACHER_MATERIAL_TYPES = ['NOTE', 'GUIDE', 'DOWNLOAD'];
+const TEACHER_MATERIAL_CONTENT_STATUSES = ['ACTIVE', 'DRAFT', 'INACTIVE'];
+const QUALITY_STATUSES = ['DRAFT', 'NEEDS_REVIEW', 'APPROVED', 'PUBLISHED'];
+const PROOF_STATUSES = ['PENDING', 'SENT', 'CONFIRMED', 'REJECTED'];
 
 async function getOrCreateQuiz(topicId) {
   const existing = await prisma.quiz.findFirst({ where: { topicId }, orderBy: { id: 'asc' } });
@@ -66,6 +72,9 @@ function normalizeBulkRow(q = {}) {
 function normalizeStudentStatus(student) {
   if (!student) return 'unknown';
   if (student.deletedAt) return 'deleted';
+  const status = String(student.status || '').toLowerCase();
+  if (status === 'pending' || status === 'pending_payment') return 'pending_payment';
+  if (status === 'suspended') return 'suspended';
   if (student.isActive === false) return 'inactive';
   return 'active';
 }
@@ -78,6 +87,163 @@ function serializeStudentForAdmin(student) {
     attemptsCount: student._count?.attempts || student.attemptsCount || 0,
     subscriptionsCount: student._count?.subscriptions || student.subscriptionsCount || 0,
   };
+}
+
+function normalizeTeacherMaterialAccessStatus(value) {
+  const status = String(value || 'PENDING').trim().toUpperCase();
+  return TEACHER_MATERIAL_ACCESS_STATUSES.includes(status) ? status : null;
+}
+
+function normalizeTeacherMaterialType(value) {
+  const type = String(value || 'NOTE').trim().toUpperCase();
+  return TEACHER_MATERIAL_TYPES.includes(type) ? type : null;
+}
+
+function normalizeTeacherMaterialContentStatus(value) {
+  const status = String(value || 'ACTIVE').trim().toUpperCase();
+  return TEACHER_MATERIAL_CONTENT_STATUSES.includes(status) ? status : null;
+}
+
+function normalizeQualityStatus(value, fallback = 'DRAFT') {
+  const status = String(value || fallback).trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return QUALITY_STATUSES.includes(status) ? status : null;
+}
+
+function normalizeProofStatus(value, fallback = 'PENDING') {
+  const status = String(value || fallback).trim().toUpperCase().replace(/[\s-]+/g, '_');
+  return PROOF_STATUSES.includes(status) ? status : fallback;
+}
+
+function parseOptionalAmount(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : undefined;
+}
+
+function getAdminConfirmationLabel(req) {
+  return req.user?.email || req.user?.id ? `admin:${req.user.email || req.user.id}` : 'admin';
+}
+
+function getPackageEndDate(startDate, pkg) {
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + Number(pkg?.durationDays || 30));
+  return endDate;
+}
+
+async function buildTeacherPackageUpdate(body = {}, existingUser = null) {
+  const data = {};
+  if (body.packageId !== undefined && body.packageId !== null && body.packageId !== '') {
+    const packageId = Number(body.packageId);
+    if (!Number.isNaN(packageId) && packageId > 0) {
+      const plan = await prisma.subscriptionPackage.findFirst({ where: { id: packageId, active: true } });
+      if (plan) {
+        data.packageId = plan.id;
+        data.package = plan.name;
+        return data;
+      }
+    }
+  }
+
+  if (body.package !== undefined) {
+    const packageName = String(body.package || '').trim();
+    data.package = packageName || null;
+    if (packageName) {
+      const plan = await prisma.subscriptionPackage.findFirst({ where: { name: packageName, active: true } });
+      if (plan) data.packageId = plan.id;
+    } else {
+      data.packageId = null;
+    }
+  } else if (existingUser && !existingUser.packageId && existingUser.package) {
+    const plan = await resolveTeacherPackage(existingUser);
+    if (plan) data.packageId = plan.id;
+  }
+
+  return data;
+}
+
+function buildPaymentTrackingData(req, proofStatus = 'PENDING', includeNotes = true) {
+  const data = { proofStatus: normalizeProofStatus(req.body.proofStatus, proofStatus) };
+  const paymentReference = String(req.body.paymentReference || req.body.transactionId || '').trim();
+  const amountPaid = parseOptionalAmount(req.body.amountPaid);
+  if (paymentReference) data.paymentReference = paymentReference;
+  if (amountPaid !== undefined) data.amountPaid = amountPaid;
+  if (includeNotes && req.body.notes !== undefined) data.notes = String(req.body.notes || '').trim() || null;
+  return data;
+}
+
+function serializeTeacherMaterialUserForAdmin(user) {
+  const base = toPublicTeacherMaterialUser(user);
+  return {
+    ...base,
+    status: String(base.status || 'PENDING').toUpperCase(),
+    accessLabel: base.isActive ? 'Active' : 'Needs activation',
+    proofStatus: base.proofStatus || 'PENDING',
+    paymentReference: base.paymentReference || null,
+    amountPaid: base.amountPaid || null,
+    confirmedBy: base.confirmedBy || null,
+    confirmedAt: base.confirmedAt || null,
+  };
+}
+
+function csvValue(value) {
+  if (value === undefined || value === null) return '';
+  const normalized = value instanceof Date ? value.toISOString() : String(value);
+  return /[",\r\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized;
+}
+
+function csvDate(value) {
+  return value ? new Date(value).toISOString() : '';
+}
+
+function csvAmount(value) {
+  if (value === undefined || value === null || value === '') return '';
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2) : String(value);
+}
+
+function buildCsv(headers, rows) {
+  const lines = [
+    headers.join(','),
+    ...rows.map((row) => headers.map((header) => csvValue(row[header])).join(',')),
+  ];
+  return `${lines.join('\r\n')}\r\n`;
+}
+
+function sendCsv(res, filename, headers, rows) {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  return res.send(buildCsv(headers, rows));
+}
+
+function buildTeacherMaterialPayload(body = {}) {
+  const materialType = normalizeTeacherMaterialType(body.materialType || body.type);
+  const status = normalizeTeacherMaterialContentStatus(body.status);
+  const qualityStatus = normalizeQualityStatus(body.qualityStatus, 'DRAFT');
+  const payload = {
+    title: String(body.title || '').trim(),
+    materialType,
+    subject: String(body.subject || '').trim() || null,
+    grade: String(body.grade || body.form || '').trim() || null,
+    topic: String(body.topic || '').trim() || null,
+    summary: String(body.summary || body.content || '').trim() || null,
+    learningObjectives: String(body.learningObjectives || '').trim() || null,
+    keyConcepts: String(body.keyConcepts || '').trim() || null,
+    suggestedTeachingMethod: String(body.suggestedTeachingMethod || '').trim() || null,
+    commonLearnerDifficulties: String(body.commonLearnerDifficulties || '').trim() || null,
+    assessmentQuestions: String(body.assessmentQuestions || '').trim() || null,
+    markingGuide: String(body.markingGuide || body.answers || '').trim() || null,
+    downloadUrl: String(body.downloadUrl || body.fileUrl || '').trim() || null,
+    status,
+    qualityStatus,
+  };
+
+  const errors = [];
+  if (!payload.title) errors.push('Title is required');
+  if (!payload.materialType) errors.push(`materialType must be one of: ${TEACHER_MATERIAL_TYPES.join(', ')}`);
+  if (!payload.status) errors.push(`status must be one of: ${TEACHER_MATERIAL_CONTENT_STATUSES.join(', ')}`);
+  if (!payload.qualityStatus) errors.push(`qualityStatus must be one of: ${QUALITY_STATUSES.join(', ')}`);
+
+  return { payload, errors };
 }
 
 async function resolveSchool(schoolId) {
@@ -135,8 +301,15 @@ function buildStudentWhere(query = {}) {
   if (status === 'active') {
     where.isActive = true;
     where.deletedAt = null;
+  } else if (status === 'pending_payment') {
+    where.status = { in: ['pending', 'pending_payment'] };
+    where.deletedAt = null;
+  } else if (status === 'suspended') {
+    where.status = 'suspended';
+    where.deletedAt = null;
   } else if (status === 'inactive') {
     where.isActive = false;
+    where.status = { notIn: ['pending', 'pending_payment', 'suspended', 'deleted'] };
     where.deletedAt = null;
   } else if (status === 'deleted') {
     where.deletedAt = { not: null };
@@ -159,20 +332,12 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
         await prisma.admin.update({ where: { id: admin.id }, data: { password: hashPassword(providedPassword) } });
       }
       appendAuditLog('admin_login_success', { actorId: admin.id, identifier: normalizedEmail, ip: req.ip });
-      return res.json({
-        message: 'Admin login successful',
-        token: buildAdminToken(admin.id),
-        user: { ...toPublicAdmin(admin), role: 'admin', isAdmin: true },
-      });
+      return res.json({ message: 'Admin login successful', token: buildAdminToken(admin.id), admin: { ...toPublicAdmin(admin), role: admin.role || 'Administrator' } });
     }
 
     if (normalizedEmail === env.ADMIN_EMAIL && verifyPassword(providedPassword, env.ADMIN_PASSWORD)) {
       appendAuditLog('admin_env_login_success', { actorId: 1, identifier: normalizedEmail, ip: req.ip });
-      return res.json({
-        message: 'Admin login successful',
-        token: buildAdminToken(1),
-        user: { id: 1, name: env.ADMIN_NAME, email: env.ADMIN_EMAIL, role: 'admin', isAdmin: true },
-      });
+      return res.json({ message: 'Admin login successful', token: buildAdminToken(1), admin: { id: 1, name: env.ADMIN_NAME, email: env.ADMIN_EMAIL, role: 'Administrator' } });
     }
 
     appendAuditLog('admin_login_failed', { identifier: normalizedEmail, ip: req.ip });
@@ -207,6 +372,340 @@ router.get('/', async (_req, res) => {
   } catch (error) {
     console.error('GET /api/admin error:', error);
     return res.status(500).json({ message: 'Failed to load admin route' });
+  }
+});
+
+router.get('/export/:type', async (req, res) => {
+  const type = String(req.params.type || '').trim().toLowerCase();
+  const dateTag = new Date().toISOString().slice(0, 10);
+
+  try {
+    if (type === 'students') {
+      const students = await prisma.student.findMany({
+        orderBy: [{ createdAt: 'desc' }],
+        include: { schoolRecord: true, _count: { select: { attempts: true, subscriptions: true } } },
+      });
+      const headers = ['id', 'name', 'phoneNumber', 'email', 'grade', 'school', 'status', 'isActive', 'attemptsCount', 'subscriptionsCount', 'createdAt', 'updatedAt'];
+      const rows = students.map((student) => ({
+        id: student.id,
+        name: student.name,
+        phoneNumber: student.phoneNumber,
+        email: student.email || '',
+        grade: student.grade || '',
+        school: student.schoolRecord?.name || student.school || '',
+        status: normalizeStudentStatus(student),
+        isActive: student.isActive ? 'TRUE' : 'FALSE',
+        attemptsCount: student._count?.attempts || 0,
+        subscriptionsCount: student._count?.subscriptions || 0,
+        createdAt: csvDate(student.createdAt),
+        updatedAt: csvDate(student.updatedAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-students-${dateTag}.csv`, headers, rows);
+    }
+
+    if (type === 'subscriptions') {
+      const subscriptions = await prisma.studentSubscription.findMany({
+        orderBy: [{ createdAt: 'desc' }],
+        include: { student: true, package: true, school: true },
+      });
+      const headers = ['id', 'studentName', 'studentPhone', 'packageName', 'packagePriceZmw', 'status', 'proofStatus', 'paymentReference', 'amountPaid', 'startDate', 'endDate', 'confirmedBy', 'confirmedAt', 'notes', 'createdAt'];
+      const rows = subscriptions.map((item) => ({
+        id: item.id,
+        studentName: item.student?.name || '',
+        studentPhone: item.student?.phoneNumber || '',
+        packageName: item.package?.name || '',
+        packagePriceZmw: csvAmount(item.package?.priceZmw),
+        status: item.status || '',
+        proofStatus: item.proofStatus || '',
+        paymentReference: item.paymentReference || '',
+        amountPaid: csvAmount(item.amountPaid),
+        startDate: csvDate(item.startDate),
+        endDate: csvDate(item.endDate),
+        confirmedBy: item.confirmedBy || '',
+        confirmedAt: csvDate(item.confirmedAt),
+        notes: item.notes || '',
+        createdAt: csvDate(item.createdAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-student-subscriptions-${dateTag}.csv`, headers, rows);
+    }
+
+    if (type === 'teacher-material-users') {
+      const users = await prisma.teacherMaterialUser.findMany({ orderBy: [{ createdAt: 'desc' }] });
+      const headers = ['id', 'name', 'phone', 'email', 'package', 'status', 'isActive', 'proofStatus', 'paymentReference', 'amountPaid', 'activatedAt', 'expiresAt', 'confirmedBy', 'confirmedAt', 'createdAt'];
+      const rows = users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        email: user.email || '',
+        package: user.package || '',
+        status: user.status || '',
+        isActive: user.isActive ? 'TRUE' : 'FALSE',
+        proofStatus: user.proofStatus || '',
+        paymentReference: user.paymentReference || '',
+        amountPaid: csvAmount(user.amountPaid),
+        activatedAt: csvDate(user.activatedAt),
+        expiresAt: csvDate(user.expiresAt),
+        confirmedBy: user.confirmedBy || '',
+        confirmedAt: csvDate(user.confirmedAt),
+        createdAt: csvDate(user.createdAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-teacher-material-users-${dateTag}.csv`, headers, rows);
+    }
+
+    if (type === 'packages') {
+      const packages = await prisma.subscriptionPackage.findMany({ orderBy: [{ priceZmw: 'asc' }] });
+      const headers = ['id', 'name', 'description', 'durationDays', 'priceZmw', 'maxSubjects', 'maxMockExams', 'includesReports', 'includesCertificates', 'active', 'createdAt'];
+      const rows = packages.map((item) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description || '',
+        durationDays: item.durationDays,
+        priceZmw: csvAmount(item.priceZmw),
+        maxSubjects: item.maxSubjects ?? '',
+        maxMockExams: item.maxMockExams ?? '',
+        includesReports: item.includesReports ? 'TRUE' : 'FALSE',
+        includesCertificates: item.includesCertificates ? 'TRUE' : 'FALSE',
+        active: item.active ? 'TRUE' : 'FALSE',
+        createdAt: csvDate(item.createdAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-packages-${dateTag}.csv`, headers, rows);
+    }
+
+    if (type === 'content-materials') {
+      const materials = await prisma.contentMaterial.findMany({
+        orderBy: [{ createdAt: 'desc' }],
+        include: { subject: true, topic: true },
+      });
+      const headers = ['id', 'title', 'subject', 'grade', 'topic', 'contentType', 'audience', 'accessLevel', 'status', 'qualityStatus', 'hasImage', 'hasPdf', 'hasTeacherGuidePdf', 'createdAt', 'updatedAt'];
+      const rows = materials.map((item) => ({
+        id: item.id,
+        title: item.title,
+        subject: item.subjectName || item.subject?.name || '',
+        grade: item.grade || item.subject?.grade || '',
+        topic: item.topicTitle || item.topic?.title || '',
+        contentType: item.contentType || '',
+        audience: item.audience || '',
+        accessLevel: item.accessLevel || '',
+        status: item.status || '',
+        qualityStatus: item.qualityStatus || '',
+        hasImage: item.imageUrl ? 'TRUE' : 'FALSE',
+        hasPdf: item.pdfUrl ? 'TRUE' : 'FALSE',
+        hasTeacherGuidePdf: item.teacherGuidePdfUrl ? 'TRUE' : 'FALSE',
+        createdAt: csvDate(item.createdAt),
+        updatedAt: csvDate(item.updatedAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-content-materials-${dateTag}.csv`, headers, rows);
+    }
+
+    if (type === 'teacher-materials') {
+      const materials = await prisma.teacherMaterial.findMany({ orderBy: [{ createdAt: 'desc' }] });
+      const headers = ['id', 'title', 'materialType', 'subject', 'grade', 'topic', 'status', 'qualityStatus', 'hasDownload', 'createdAt', 'updatedAt'];
+      const rows = materials.map((item) => ({
+        id: item.id,
+        title: item.title,
+        materialType: item.materialType || '',
+        subject: item.subject || '',
+        grade: item.grade || '',
+        topic: item.topic || '',
+        status: item.status || '',
+        qualityStatus: item.qualityStatus || '',
+        hasDownload: item.downloadUrl ? 'TRUE' : 'FALSE',
+        createdAt: csvDate(item.createdAt),
+        updatedAt: csvDate(item.updatedAt),
+      }));
+      logAdminAction(req, 'admin_csv_exported', { type, rows: rows.length });
+      return sendCsv(res, `zedexam-teacher-materials-${dateTag}.csv`, headers, rows);
+    }
+
+    return res.status(404).json({
+      message: 'Unknown export type',
+      supportedTypes: ['students', 'subscriptions', 'teacher-material-users', 'packages', 'content-materials', 'teacher-materials'],
+    });
+  } catch (error) {
+    console.error(`GET /api/admin/export/${type} error:`, error);
+    return res.status(500).json({ message: 'Failed to export admin data' });
+  }
+});
+
+router.get('/payment-queue', async (_req, res) => {
+  try {
+    const studentSubscriptions = await prisma.studentSubscription.findMany({
+      where: {
+        OR: [
+          { status: 'PENDING' },
+          { status: 'INACTIVE' },
+          { proofStatus: { in: ['PENDING', 'SENT'] } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      include: { student: true, package: true, school: true },
+    });
+
+    const teacherUsers = await prisma.teacherMaterialUser.findMany({
+      where: {
+        OR: [
+          { status: 'PENDING' },
+          { status: 'INACTIVE' },
+          { proofStatus: { in: ['PENDING', 'SENT'] } },
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    return res.json({
+      students: studentSubscriptions,
+      teachers: teacherUsers.map(serializeTeacherMaterialUserForAdmin),
+      counts: {
+        students: studentSubscriptions.length,
+        teachers: teacherUsers.length,
+        total: studentSubscriptions.length + teacherUsers.length,
+      },
+    });
+  } catch (error) {
+    console.error('GET /api/admin/payment-queue error:', error);
+    return res.status(500).json({ message: 'Failed to load payment queue' });
+  }
+});
+
+router.patch('/payment-queue/student-subscriptions/:id/activate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'Invalid subscription id' });
+
+    const existing = await prisma.studentSubscription.findUnique({ where: { id }, include: { package: true } });
+    if (!existing) return res.status(404).json({ message: 'Subscription not found' });
+
+    const startDate = req.body.startDate ? new Date(req.body.startDate) : new Date();
+    const subscription = await prisma.$transaction(async (tx) => {
+      const updated = await tx.studentSubscription.update({
+        where: { id },
+        data: {
+          ...buildPaymentTrackingData(req, 'CONFIRMED', false),
+          status: 'ACTIVE',
+          startDate,
+          endDate: getPackageEndDate(startDate, existing.package),
+          confirmedBy: getAdminConfirmationLabel(req),
+          confirmedAt: new Date(),
+        },
+        include: { student: true, package: true, school: true },
+      });
+
+      const student = await tx.student.update({
+        where: { id: updated.studentId },
+        data: { isActive: true, status: 'active', deactivatedAt: null },
+      });
+
+      return { ...updated, student };
+    });
+
+    logAdminAction(req, 'payment_queue_student_activated', { subscriptionId: id, studentId: subscription.studentId, packageId: subscription.packageId });
+    return res.json({ message: 'Student package activated after payment confirmation', subscription });
+  } catch (error) {
+    console.error('PATCH /api/admin/payment-queue/student-subscriptions/:id/activate error:', error);
+    return res.status(500).json({ message: 'Failed to activate student package' });
+  }
+});
+
+router.patch('/payment-queue/student-subscriptions/:id/deactivate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'Invalid subscription id' });
+
+    const subscription = await prisma.$transaction(async (tx) => {
+      const updated = await tx.studentSubscription.update({
+        where: { id },
+        data: {
+          ...buildPaymentTrackingData(req, 'REJECTED', false),
+          status: 'INACTIVE',
+          startDate: null,
+          endDate: null,
+          confirmedBy: null,
+          confirmedAt: null,
+        },
+        include: { student: true, package: true, school: true },
+      });
+
+      const activeCount = await tx.studentSubscription.count({
+        where: { studentId: updated.studentId, status: 'ACTIVE', id: { not: id } },
+      });
+      if (activeCount === 0) {
+        const student = await tx.student.update({
+          where: { id: updated.studentId },
+          data: { isActive: false, status: 'suspended', deactivatedAt: new Date() },
+        });
+        return { ...updated, student };
+      }
+
+      return updated;
+    });
+
+    logAdminAction(req, 'payment_queue_student_deactivated', { subscriptionId: id, studentId: subscription.studentId, packageId: subscription.packageId });
+    return res.json({ message: 'Student package deactivated', subscription });
+  } catch (error) {
+    console.error('PATCH /api/admin/payment-queue/student-subscriptions/:id/deactivate error:', error);
+    return res.status(500).json({ message: 'Failed to deactivate student package' });
+  }
+});
+
+router.patch('/payment-queue/teacher-material-users/:id/activate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+    const existingUser = await prisma.teacherMaterialUser.findUnique({ where: { id } });
+    if (!existingUser) return res.status(404).json({ message: 'Teacher Materials user not found' });
+    const activatedAt = new Date();
+    const packageUpdate = await buildTeacherPackageUpdate(req.body, existingUser);
+
+    const user = await prisma.teacherMaterialUser.update({
+      where: { id },
+      data: {
+        ...packageUpdate,
+        ...buildPaymentTrackingData(req, 'CONFIRMED', false),
+        status: 'ACTIVE',
+        isActive: true,
+        activatedAt,
+        expiresAt: await getTeacherExpiryDate({ ...existingUser, ...packageUpdate }, activatedAt, req.body.expiresAt),
+        confirmedBy: getAdminConfirmationLabel(req),
+        confirmedAt: new Date(),
+      },
+    });
+
+    logAdminAction(req, 'payment_queue_teacher_activated', { teacherMaterialUserId: id });
+    return res.json({ message: 'Teacher Materials access activated after payment confirmation', user: serializeTeacherMaterialUserForAdmin(user) });
+  } catch (error) {
+    console.error('PATCH /api/admin/payment-queue/teacher-material-users/:id/activate error:', error);
+    return res.status(500).json({ message: 'Failed to activate Teacher Materials access' });
+  }
+});
+
+router.patch('/payment-queue/teacher-material-users/:id/deactivate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+
+    const user = await prisma.teacherMaterialUser.update({
+      where: { id },
+      data: {
+        ...buildPaymentTrackingData(req, 'REJECTED', false),
+        status: 'INACTIVE',
+        isActive: false,
+        activatedAt: null,
+        expiresAt: null,
+        confirmedBy: null,
+        confirmedAt: null,
+      },
+    });
+
+    logAdminAction(req, 'payment_queue_teacher_deactivated', { teacherMaterialUserId: id });
+    return res.json({ message: 'Teacher Materials access deactivated', user: serializeTeacherMaterialUserForAdmin(user) });
+  } catch (error) {
+    console.error('PATCH /api/admin/payment-queue/teacher-material-users/:id/deactivate error:', error);
+    return res.status(500).json({ message: 'Failed to deactivate Teacher Materials access' });
   }
 });
 
@@ -528,6 +1027,244 @@ router.delete('/students/:id', adminWriteLimiter, async (req, res) => {
   } catch (error) {
     console.error('DELETE /api/admin/students/:id error:', error);
     return res.status(500).json({ message: 'Failed to remove student' });
+  }
+});
+
+router.get('/teacher-material-users', async (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const status = normalizeTeacherMaterialAccessStatus(req.query.status);
+    const where = {};
+
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { package: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const users = await prisma.teacherMaterialUser.findMany({
+      where,
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return res.json(users.map(serializeTeacherMaterialUserForAdmin));
+  } catch (error) {
+    console.error('GET /api/admin/teacher-material-users error:', error);
+    return res.status(500).json({ message: 'Failed to load Teacher Materials users' });
+  }
+});
+
+router.patch('/teacher-material-users/:id/status', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const status = normalizeTeacherMaterialAccessStatus(req.body.status);
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+    if (!status) return res.status(400).json({ message: `status must be one of: ${TEACHER_MATERIAL_ACCESS_STATUSES.join(', ')}` });
+    const existingUser = await prisma.teacherMaterialUser.findUnique({ where: { id } });
+    if (!existingUser) return res.status(404).json({ message: 'Teacher Materials user not found' });
+    const activatedAt = status === 'ACTIVE' ? new Date() : null;
+    const packageUpdate = await buildTeacherPackageUpdate(req.body, existingUser);
+
+    const data = {
+      ...packageUpdate,
+      status,
+      isActive: status === 'ACTIVE',
+      activatedAt,
+      expiresAt: status === 'ACTIVE' ? await getTeacherExpiryDate({ ...existingUser, ...packageUpdate }, activatedAt, req.body.expiresAt) : null,
+      proofStatus: status === 'ACTIVE' ? 'CONFIRMED' : normalizeProofStatus(req.body.proofStatus, 'PENDING'),
+      confirmedBy: status === 'ACTIVE' ? getAdminConfirmationLabel(req) : null,
+      confirmedAt: status === 'ACTIVE' ? new Date() : null,
+    };
+
+    if (req.body.paymentReference !== undefined || req.body.transactionId !== undefined) {
+      data.paymentReference = String(req.body.paymentReference || req.body.transactionId || '').trim() || null;
+    }
+    if (req.body.amountPaid !== undefined) {
+      const amountPaid = parseOptionalAmount(req.body.amountPaid);
+      if (amountPaid !== undefined) data.amountPaid = amountPaid;
+    }
+
+    const user = await prisma.teacherMaterialUser.update({ where: { id }, data });
+    logAdminAction(req, 'teacher_material_user_status_updated', { teacherMaterialUserId: id, status });
+    return res.json({
+      message: 'Teacher Materials access status updated',
+      user: serializeTeacherMaterialUserForAdmin(user),
+    });
+  } catch (error) {
+    console.error('PATCH /api/admin/teacher-material-users/:id/status error:', error);
+    return res.status(500).json({ message: 'Failed to update Teacher Materials access status' });
+  }
+});
+
+router.patch('/teacher-material-users/:id/activate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+    const existingUser = await prisma.teacherMaterialUser.findUnique({ where: { id } });
+    if (!existingUser) return res.status(404).json({ message: 'Teacher Materials user not found' });
+    const activatedAt = new Date();
+    const packageUpdate = await buildTeacherPackageUpdate(req.body, existingUser);
+
+    const data = {
+      ...packageUpdate,
+      status: 'ACTIVE',
+      isActive: true,
+      activatedAt,
+      expiresAt: await getTeacherExpiryDate({ ...existingUser, ...packageUpdate }, activatedAt, req.body.expiresAt),
+      proofStatus: 'CONFIRMED',
+      confirmedBy: getAdminConfirmationLabel(req),
+      confirmedAt: new Date(),
+    };
+    if (req.body.paymentReference !== undefined || req.body.transactionId !== undefined) {
+      data.paymentReference = String(req.body.paymentReference || req.body.transactionId || '').trim() || null;
+    }
+    if (req.body.amountPaid !== undefined) {
+      const amountPaid = parseOptionalAmount(req.body.amountPaid);
+      if (amountPaid !== undefined) data.amountPaid = amountPaid;
+    }
+
+    const user = await prisma.teacherMaterialUser.update({ where: { id }, data });
+    logAdminAction(req, 'teacher_material_user_activated', { teacherMaterialUserId: id });
+    return res.json({
+      message: 'Teacher Materials access activated',
+      user: serializeTeacherMaterialUserForAdmin(user),
+    });
+  } catch (error) {
+    console.error('PATCH /api/admin/teacher-material-users/:id/activate error:', error);
+    return res.status(500).json({ message: 'Failed to activate Teacher Materials access' });
+  }
+});
+
+router.patch('/teacher-material-users/:id/deactivate', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+
+    const user = await prisma.teacherMaterialUser.update({
+      where: { id },
+      data: { status: 'INACTIVE', isActive: false, activatedAt: null, expiresAt: null, proofStatus: 'REJECTED', confirmedBy: null, confirmedAt: null },
+    });
+    logAdminAction(req, 'teacher_material_user_deactivated', { teacherMaterialUserId: id });
+    return res.json({
+      message: 'Teacher Materials access deactivated',
+      user: serializeTeacherMaterialUserForAdmin(user),
+    });
+  } catch (error) {
+    console.error('PATCH /api/admin/teacher-material-users/:id/deactivate error:', error);
+    return res.status(500).json({ message: 'Failed to deactivate Teacher Materials access' });
+  }
+});
+
+router.patch('/teacher-material-users/:id/reset-password', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const nextPassword = String(req.body.password || req.body.newPassword || '').trim();
+    if (!id) return res.status(400).json({ message: 'Invalid Teacher Materials user ID' });
+    if (nextPassword.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    const user = await prisma.teacherMaterialUser.update({
+      where: { id },
+      data: { password: hashPassword(nextPassword) },
+    });
+
+    logAdminAction(req, 'teacher_material_user_password_reset', { teacherMaterialUserId: id });
+    return res.json({
+      message: 'Teacher Materials password reset successfully',
+      user: serializeTeacherMaterialUserForAdmin(user),
+    });
+  } catch (error) {
+    console.error('PATCH /api/admin/teacher-material-users/:id/reset-password error:', error);
+    return res.status(500).json({ message: 'Failed to reset Teacher Materials password' });
+  }
+});
+
+router.get('/teacher-materials', async (req, res) => {
+  try {
+    const materialType = req.query.type ? normalizeTeacherMaterialType(req.query.type) : null;
+    const status = req.query.status ? normalizeTeacherMaterialContentStatus(req.query.status) : null;
+    const qualityStatus = req.query.qualityStatus ? normalizeQualityStatus(req.query.qualityStatus) : null;
+    const where = {};
+    if (materialType) where.materialType = materialType;
+    if (status) where.status = status;
+    if (qualityStatus) where.qualityStatus = qualityStatus;
+
+    const materials = await prisma.teacherMaterial.findMany({
+      where,
+      orderBy: [{ materialType: 'asc' }, { subject: 'asc' }, { grade: 'asc' }, { topic: 'asc' }, { createdAt: 'desc' }],
+    });
+
+    return res.json(materials);
+  } catch (error) {
+    console.error('GET /api/admin/teacher-materials error:', error);
+    return res.status(500).json({ message: 'Failed to load Teacher Materials library' });
+  }
+});
+
+router.post('/teacher-materials', adminWriteLimiter, async (req, res) => {
+  try {
+    const { payload, errors } = buildTeacherMaterialPayload(req.body);
+    if (errors.length) return res.status(400).json({ message: 'Validation failed', errors });
+
+    const material = await prisma.teacherMaterial.create({ data: payload });
+    logAdminAction(req, 'teacher_material_created', { materialId: material.id, materialType: material.materialType });
+    return res.status(201).json({ message: 'Teacher Material created successfully', material });
+  } catch (error) {
+    console.error('POST /api/admin/teacher-materials error:', error);
+    return res.status(500).json({ message: 'Failed to create Teacher Material' });
+  }
+});
+
+router.post('/teacher-materials/publish-active-existing', adminWriteLimiter, async (req, res) => {
+  try {
+    const result = await prisma.teacherMaterial.updateMany({
+      where: {
+        status: 'ACTIVE',
+        qualityStatus: { in: ['DRAFT', 'NEEDS_REVIEW', 'APPROVED'] },
+      },
+      data: { qualityStatus: 'PUBLISHED' },
+    });
+    logAdminAction(req, 'teacher_materials_bulk_published', { count: result.count });
+    return res.json({ message: `${result.count} active teacher material(s) published`, count: result.count });
+  } catch (error) {
+    console.error('POST /api/admin/teacher-materials/publish-active-existing error:', error);
+    return res.status(500).json({ message: 'Failed to publish active Teacher Materials' });
+  }
+});
+
+router.patch('/teacher-materials/:id', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ message: 'Invalid Teacher Material ID' });
+
+    const { payload, errors } = buildTeacherMaterialPayload(req.body);
+    if (errors.length) return res.status(400).json({ message: 'Validation failed', errors });
+
+    const material = await prisma.teacherMaterial.update({ where: { id }, data: payload });
+    logAdminAction(req, 'teacher_material_updated', { materialId: id, materialType: material.materialType });
+    return res.json({ message: 'Teacher Material updated successfully', material });
+  } catch (error) {
+    console.error('PATCH /api/admin/teacher-materials/:id error:', error);
+    return res.status(500).json({ message: 'Failed to update Teacher Material' });
+  }
+});
+
+router.delete('/teacher-materials/:id', adminWriteLimiter, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ message: 'Invalid Teacher Material ID' });
+
+    await prisma.teacherMaterial.delete({ where: { id } });
+    logAdminAction(req, 'teacher_material_deleted', { materialId: id });
+    return res.json({ message: 'Teacher Material deleted successfully' });
+  } catch (error) {
+    console.error('DELETE /api/admin/teacher-materials/:id error:', error);
+    return res.status(500).json({ message: 'Failed to delete Teacher Material' });
   }
 });
 

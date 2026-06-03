@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { authFetch } from '../api';
+import { publicFetch } from '../api';
 import PageShell from '../components/PageShell';
 import PaymentInstructions from '../components/PaymentInstructions';
 import { EmptyState, LoadingState, Notice, SectionCard } from '../components/ui';
@@ -16,7 +16,7 @@ export default function Subjects() {
       setLoading(true);
       setError('');
       try {
-        const data = await authFetch('/subjects');
+        const data = await publicFetch('/subjects');
         setSubjects(Array.isArray(data) ? data : []);
       } catch (err) {
         setError(err.message || 'Failed to load subjects.');

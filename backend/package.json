@@ -4,10 +4,9 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
-    "prestart": "npx prisma db push",
     "start": "node server.js",
     "dev": "node server.js",
-    "deploy:start": "npx prisma db push && npm run seed:admin && node server.js",
+    "deploy:start": "node server.js",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "seed": "node prisma/seed.js",

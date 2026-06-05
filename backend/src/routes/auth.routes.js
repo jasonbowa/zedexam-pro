@@ -91,7 +91,9 @@ async function createPendingSubscription(tx, { student, selectedPlan, schoolId, 
 
   const insertColumns = candidates.map(([column]) => column);
   const values = candidates.map(([, value]) => value);
-  const placeholders = values.map((_, index) => `$${index + 1}`);
+  const placeholders = insertColumns.map((column, index) =>
+    column === 'status' ? `$${index + 1}::${quoteIdentifier('SubscriptionStatus')}` : `$${index + 1}`
+  );
   const returningColumns = ['id', 'studentId', 'packageId', 'schoolId', 'status', 'paymentReference', 'proofStatus', 'notes', 'createdAt', 'updatedAt'].filter((column) =>
     columns.has(column)
   );
@@ -302,14 +304,6 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('POST /api/auth/register error:', error);
-    if (req.query.debug === 'registration') {
-      return res.status(500).json({
-        message: 'Failed to register student',
-        code: error.code || null,
-        detail: error.message || String(error),
-        meta: error.meta || null,
-      });
-    }
     return res.status(500).json({ message: 'Failed to register student' });
   }
 });

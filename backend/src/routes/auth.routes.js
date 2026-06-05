@@ -59,6 +59,60 @@ async function resolveSchool(schoolId) {
   return { schoolId: school.id, schoolName: school.name };
 }
 
+function quoteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+async function createPendingSubscription(tx, { student, selectedPlan, schoolId, paymentReference }) {
+  const columnRows = await tx.$queryRaw`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'StudentSubscription'
+  `;
+  const columns = new Set(columnRows.map((row) => row.column_name));
+
+  if (!columns.has('studentId') || !columns.has('packageId')) {
+    throw new Error('StudentSubscription table is missing required columns');
+  }
+
+  const now = new Date();
+  const candidates = [
+    ['studentId', student.id],
+    ['packageId', selectedPlan.id],
+    ['schoolId', schoolId || null],
+    ['status', 'PENDING'],
+    ['proofStatus', 'PENDING'],
+    ['paymentReference', paymentReference],
+    ['notes', `Created during student registration. Pending manual payment confirmation. Reference: ${paymentReference}.`],
+    ['createdAt', now],
+    ['updatedAt', now],
+  ].filter(([column, value]) => columns.has(column) && value !== undefined);
+
+  const insertColumns = candidates.map(([column]) => column);
+  const values = candidates.map(([, value]) => value);
+  const placeholders = values.map((_, index) => `$${index + 1}`);
+  const returningColumns = ['id', 'studentId', 'packageId', 'schoolId', 'status', 'paymentReference', 'proofStatus', 'notes', 'createdAt', 'updatedAt'].filter((column) =>
+    columns.has(column)
+  );
+
+  const rows = await tx.$queryRawUnsafe(
+    `INSERT INTO ${quoteIdentifier('StudentSubscription')} (${insertColumns.map(quoteIdentifier).join(', ')})
+     VALUES (${placeholders.join(', ')})
+     RETURNING ${returningColumns.map(quoteIdentifier).join(', ')}`,
+    ...values
+  );
+
+  const subscription = rows[0] || {};
+  return {
+    ...subscription,
+    paymentReference: subscription.paymentReference || paymentReference,
+    proofStatus: subscription.proofStatus || 'PENDING',
+    package: selectedPlan,
+    school: null,
+  };
+}
+
 router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { identifier, email, phoneOrEmail, phoneNumber, phone, password } = req.body;
@@ -228,17 +282,11 @@ router.post('/register', registerLimiter, async (req, res) => {
       });
 
       const paymentReference = `STUDENT-${createdStudent.id}`;
-      const createdSubscription = await tx.studentSubscription.create({
-        data: {
-          studentId: createdStudent.id,
-          packageId: selectedPlan.id,
-          schoolId: schoolResolution.schoolId,
-          status: 'PENDING',
-          proofStatus: 'PENDING',
-          paymentReference,
-          notes: `Created during student registration. Pending manual payment confirmation. Reference: ${paymentReference}.`,
-        },
-        include: { package: true, school: true },
+      const createdSubscription = await createPendingSubscription(tx, {
+        student: createdStudent,
+        selectedPlan,
+        schoolId: schoolResolution.schoolId,
+        paymentReference,
       });
 
       return { student: createdStudent, subscription: createdSubscription };

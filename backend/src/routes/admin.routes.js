@@ -171,6 +171,130 @@ function buildPaymentTrackingData(req, proofStatus = 'PENDING', includeNotes = t
   return data;
 }
 
+function quoteIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+async function getStudentSubscriptionColumns() {
+  const rows = await prisma.$queryRaw`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'StudentSubscription'
+  `;
+  return new Set(rows.map((row) => row.column_name));
+}
+
+function subscriptionColumnExpression(columns, column, alias = column) {
+  if (!columns.has(column)) return `NULL AS ${quoteIdentifier(alias)}`;
+  return `s.${quoteIdentifier(column)} AS ${quoteIdentifier(alias)}`;
+}
+
+async function findPaymentQueueStudentSubscriptions() {
+  const columns = await getStudentSubscriptionColumns();
+  const whereParts = [];
+  if (columns.has('status')) whereParts.push(`s.${quoteIdentifier('status')} IN ('PENDING', 'INACTIVE')`);
+  if (columns.has('proofStatus')) whereParts.push(`s.${quoteIdentifier('proofStatus')} IN ('PENDING', 'SENT')`);
+  const whereSql = whereParts.length ? `WHERE ${whereParts.join(' OR ')}` : '';
+
+  const selectColumns = [
+    'id',
+    'studentId',
+    'packageId',
+    'schoolId',
+    'sponsorName',
+    'status',
+    'startDate',
+    'endDate',
+    'activationCode',
+    'paymentReference',
+    'amountPaid',
+    'proofStatus',
+    'confirmedBy',
+    'confirmedAt',
+    'notes',
+    'createdAt',
+    'updatedAt',
+  ].map((column) => subscriptionColumnExpression(columns, column));
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT
+      ${selectColumns.join(', ')},
+      st.id AS "student_id",
+      st.name AS "student_name",
+      st."phoneNumber" AS "student_phoneNumber",
+      st.email AS "student_email",
+      st.grade AS "student_grade",
+      st."isActive" AS "student_isActive",
+      st.status AS "student_status",
+      p.id AS "package_id",
+      p.name AS "package_name",
+      p.description AS "package_description",
+      p."durationDays" AS "package_durationDays",
+      p."priceZmw" AS "package_priceZmw",
+      p."maxSubjects" AS "package_maxSubjects",
+      p."maxMockExams" AS "package_maxMockExams",
+      p."includesReports" AS "package_includesReports",
+      p."includesCertificates" AS "package_includesCertificates",
+      p.active AS "package_active",
+      sc.id AS "school_id",
+      sc.name AS "school_name"
+    FROM ${quoteIdentifier('StudentSubscription')} s
+    LEFT JOIN ${quoteIdentifier('Student')} st ON st.id = s.${quoteIdentifier('studentId')}
+    LEFT JOIN ${quoteIdentifier('SubscriptionPackage')} p ON p.id = s.${quoteIdentifier('packageId')}
+    LEFT JOIN ${quoteIdentifier('School')} sc ON ${columns.has('schoolId') ? `sc.id = s.${quoteIdentifier('schoolId')}` : 'false'}
+    ${whereSql}
+    ORDER BY ${columns.has('createdAt') ? `s.${quoteIdentifier('createdAt')}` : 's.id'} DESC
+  `);
+
+  return rows.map((row) => ({
+    id: row.id,
+    studentId: row.studentId,
+    packageId: row.packageId,
+    schoolId: row.schoolId,
+    sponsorName: row.sponsorName,
+    status: row.status || 'PENDING',
+    startDate: row.startDate,
+    endDate: row.endDate,
+    activationCode: row.activationCode,
+    paymentReference: row.paymentReference || null,
+    amountPaid: row.amountPaid,
+    proofStatus: row.proofStatus || 'PENDING',
+    confirmedBy: row.confirmedBy,
+    confirmedAt: row.confirmedAt,
+    notes: row.notes,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    student: row.student_id
+      ? {
+          id: row.student_id,
+          name: row.student_name,
+          phoneNumber: row.student_phoneNumber,
+          phone: row.student_phoneNumber,
+          email: row.student_email,
+          grade: row.student_grade,
+          isActive: row.student_isActive,
+          status: row.student_status,
+        }
+      : null,
+    package: row.package_id
+      ? {
+          id: row.package_id,
+          name: row.package_name,
+          description: row.package_description,
+          durationDays: row.package_durationDays,
+          priceZmw: row.package_priceZmw,
+          maxSubjects: row.package_maxSubjects,
+          maxMockExams: row.package_maxMockExams,
+          includesReports: row.package_includesReports,
+          includesCertificates: row.package_includesCertificates,
+          active: row.package_active,
+        }
+      : null,
+    school: row.school_id ? { id: row.school_id, name: row.school_name } : null,
+  }));
+}
+
 function serializeTeacherMaterialUserForAdmin(user) {
   const base = toPublicTeacherMaterialUser(user);
   return {
@@ -534,17 +658,7 @@ router.get('/export/:type', async (req, res) => {
 
 router.get('/payment-queue', async (_req, res) => {
   try {
-    const studentSubscriptions = await prisma.studentSubscription.findMany({
-      where: {
-        OR: [
-          { status: 'PENDING' },
-          { status: 'INACTIVE' },
-          { proofStatus: { in: ['PENDING', 'SENT'] } },
-        ],
-      },
-      orderBy: [{ createdAt: 'desc' }],
-      include: { student: true, package: true, school: true },
-    });
+    const studentSubscriptions = await findPaymentQueueStudentSubscriptions();
 
     const teacherUsers = await prisma.teacherMaterialUser.findMany({
       where: {

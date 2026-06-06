@@ -23,8 +23,8 @@ export default function Login({ initialMode = 'student-login' }) {
     phone: '',
     grade: 'FORM 1',
     packageId: '',
-    email: 'admin@zedexam.com',
-    password: 'change_this_admin_password',
+    email: '',
+    password: '',
   });
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(false);

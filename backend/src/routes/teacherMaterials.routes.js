@@ -20,6 +20,11 @@ const { toPublicTeacherMaterialUser } = require('../utils/serializers');
 const { appendAuditLog } = require('../utils/audit');
 const { getPaymentInstructions } = require('../utils/payment');
 const { resolveTeacherPackage } = require('../utils/accessControl');
+const {
+  createTeacherMaterialUser,
+  findTeacherMaterialUserByContact,
+  updateTeacherMaterialUser,
+} = require('../utils/teacherMaterialUsers');
 
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'teacher-materials-login' });
 const registerLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'teacher-materials-register' });
@@ -81,14 +86,15 @@ async function findTeacherMaterialUserByIdentifier(rawIdentifier) {
   const normalizedEmail = normalizeEmail(rawIdentifier);
   const loginCandidates = buildStudentLoginCandidates(rawIdentifier);
 
-  return prisma.teacherMaterialUser.findFirst({
-    where: {
-      OR: [
-        ...(normalizedEmail && normalizedEmail.includes('@') ? [{ email: normalizedEmail }] : []),
-        ...loginCandidates.map((candidate) => ({ phone: candidate })),
-      ],
-    },
-  });
+  for (const candidate of loginCandidates) {
+    const user = await findTeacherMaterialUserByContact({
+      phone: candidate,
+      email: normalizedEmail && normalizedEmail.includes('@') ? normalizedEmail : null,
+    });
+    if (user) return user;
+  }
+
+  return null;
 }
 
 router.get('/packages', async (_req, res) => {
@@ -143,30 +149,24 @@ router.post('/register', registerLimiter, async (req, res) => {
       if (plan) resolvedPackageId = plan.id;
     }
 
-    const existing = await prisma.teacherMaterialUser.findFirst({
-      where: {
-        OR: [
-          { phone: normalizedPhone },
-          ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
-        ],
-      },
+    const existing = await findTeacherMaterialUserByContact({
+      phone: normalizedPhone,
+      email: normalizedEmail,
     });
 
     if (existing) {
       return res.status(409).json({ message: 'A Teacher Materials account with this phone number or email already exists' });
     }
 
-    const user = await prisma.teacherMaterialUser.create({
-      data: {
-        name: trimmedName,
-        phone: normalizedPhone,
-        email: normalizedEmail,
-        password: hashPassword(trimmedPassword),
-        packageId: resolvedPackageId,
-        package: packageName,
-        status: 'PENDING',
-        isActive: false,
-      },
+    const user = await createTeacherMaterialUser({
+      name: trimmedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      password: hashPassword(trimmedPassword),
+      packageId: resolvedPackageId,
+      package: packageName,
+      status: 'PENDING',
+      isActive: false,
     });
 
     appendAuditLog('teacher_materials_registered', { actorId: user.id, phone: normalizedPhone, ip: req.ip });
@@ -201,7 +201,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     const updates = { lastLoginAt: new Date() };
     if (shouldUpgradePasswordHash(user.password)) updates.password = hashPassword(providedPassword);
 
-    const safeUser = await prisma.teacherMaterialUser.update({ where: { id: user.id }, data: updates });
+    const safeUser = await updateTeacherMaterialUser(user.id, updates);
 
     appendAuditLog('teacher_materials_login_success', { actorId: safeUser.id, ip: req.ip });
     return res.json({
@@ -235,10 +235,7 @@ router.post('/change-password', requireTeacherMaterials, async (req, res) => {
       return res.status(401).json({ message: 'Current password is incorrect' });
     }
 
-    await prisma.teacherMaterialUser.update({
-      where: { id: user.id },
-      data: { password: hashPassword(nextPassword) },
-    });
+    await updateTeacherMaterialUser(user.id, { password: hashPassword(nextPassword) });
 
     appendAuditLog('teacher_materials_password_changed', { actorId: user.id, ip: req.ip });
     return res.json({ message: 'Password changed successfully' });
@@ -253,7 +250,7 @@ router.get('/me', requireTeacherMaterials, async (req, res) => {
   if (!user.packageId && user.package) {
     const plan = await resolveTeacherPackage(user);
     if (plan) {
-      const updated = await prisma.teacherMaterialUser.update({ where: { id: user.id }, data: { packageId: plan.id } });
+      const updated = await updateTeacherMaterialUser(user.id, { packageId: plan.id });
       return res.json({
         user: toPublicTeacherMaterialUser(updated),
         access: getAccessSummary(updated),

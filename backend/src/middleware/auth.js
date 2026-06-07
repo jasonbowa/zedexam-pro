@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const env = require('../config/env');
 const { verifyToken } = require('../utils/security');
+const { findTeacherMaterialUserById, updateTeacherMaterialUser } = require('../utils/teacherMaterialUsers');
 
 function extractToken(req) {
   const authHeader = req.headers.authorization || req.headers.Authorization;
@@ -84,7 +85,7 @@ async function requireTeacherMaterials(req, res, next) {
   }
 
   try {
-    const user = await prisma.teacherMaterialUser.findUnique({ where: { id: String(req.user.id) } });
+    const user = await findTeacherMaterialUserById(req.user.id);
     if (!user) {
       return res.status(401).json({ message: 'Teacher Materials account was not found' });
     }
@@ -105,10 +106,7 @@ async function requireActiveTeacherMaterials(req, res, next) {
 
     if (user.isActive !== true || status !== 'ACTIVE' || expiredByDate) {
       if (expiredByDate && status === 'ACTIVE') {
-        prisma.teacherMaterialUser.update({
-          where: { id: user.id },
-          data: { status: 'EXPIRED', isActive: false },
-        }).catch(() => null);
+        updateTeacherMaterialUser(user.id, { status: 'EXPIRED', isActive: false }).catch(() => null);
       }
       return res.status(403).json({
         message: 'Teacher Materials access is not active yet',

@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: zedexam
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci && npm run prisma:generate
+    startCommand: npm run deploy:start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        value: https://zedexam-pro-necy.vercel.app,https://zedexam-pro-temp-live.vercel.app
+      - key: APP_BASE_URL
+        value: https://zedexam.onrender.com
+      - key: ADMIN_NAME
+        value: ZedExam Admin
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: TOKEN_TTL_SECONDS
+        value: 604800
+      - key: TEACHER_MATERIALS_TOKEN_TTL_SECONDS
+        value: 604800
+      - key: UPLOAD_DIR
+        value: uploads
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 5

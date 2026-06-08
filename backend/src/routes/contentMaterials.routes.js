@@ -129,6 +129,122 @@ function buildWhereFromQuery(query = {}, audience) {
   return where;
 }
 
+async function ensureContentMaterialSchema() {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "ContentMaterial" (
+      "id" SERIAL PRIMARY KEY,
+      "title" TEXT NOT NULL,
+      "subjectId" INTEGER,
+      "topicId" INTEGER,
+      "subjectName" TEXT,
+      "grade" TEXT,
+      "topicTitle" TEXT,
+      "contentType" TEXT NOT NULL DEFAULT 'NOTE',
+      "audience" TEXT NOT NULL DEFAULT 'STUDENT',
+      "accessLevel" TEXT,
+      "content" TEXT,
+      "imageUrl" TEXT,
+      "pdfUrl" TEXT,
+      "teacherGuidePdfUrl" TEXT,
+      "commonMistakes" TEXT,
+      "examStyleGuidance" TEXT,
+      "answersAndExplanations" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+      "qualityStatus" TEXT NOT NULL DEFAULT 'DRAFT',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const contentColumns = [
+    ['title', 'TEXT'],
+    ['subjectId', 'INTEGER'],
+    ['topicId', 'INTEGER'],
+    ['subjectName', 'TEXT'],
+    ['grade', 'TEXT'],
+    ['topicTitle', 'TEXT'],
+    ['contentType', "TEXT NOT NULL DEFAULT 'NOTE'"],
+    ['audience', "TEXT NOT NULL DEFAULT 'STUDENT'"],
+    ['accessLevel', 'TEXT'],
+    ['content', 'TEXT'],
+    ['imageUrl', 'TEXT'],
+    ['pdfUrl', 'TEXT'],
+    ['teacherGuidePdfUrl', 'TEXT'],
+    ['commonMistakes', 'TEXT'],
+    ['examStyleGuidance', 'TEXT'],
+    ['answersAndExplanations', 'TEXT'],
+    ['status', "TEXT NOT NULL DEFAULT 'ACTIVE'"],
+    ['qualityStatus', "TEXT NOT NULL DEFAULT 'DRAFT'"],
+    ['createdAt', 'TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+    ['updatedAt', 'TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+  ];
+  for (const [name, definition] of contentColumns) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ContentMaterial" ADD COLUMN IF NOT EXISTS "${name}" ${definition}`);
+  }
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "TeacherMaterial" (
+      "id" SERIAL PRIMARY KEY,
+      "title" TEXT NOT NULL,
+      "materialType" TEXT NOT NULL DEFAULT 'NOTE',
+      "subject" TEXT,
+      "grade" TEXT,
+      "topic" TEXT,
+      "summary" TEXT,
+      "learningObjectives" TEXT,
+      "keyConcepts" TEXT,
+      "suggestedTeachingMethod" TEXT,
+      "commonLearnerDifficulties" TEXT,
+      "assessmentQuestions" TEXT,
+      "markingGuide" TEXT,
+      "downloadUrl" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+      "qualityStatus" TEXT NOT NULL DEFAULT 'DRAFT',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const teacherColumns = [
+    ['title', 'TEXT'],
+    ['materialType', "TEXT NOT NULL DEFAULT 'NOTE'"],
+    ['subject', 'TEXT'],
+    ['grade', 'TEXT'],
+    ['topic', 'TEXT'],
+    ['summary', 'TEXT'],
+    ['learningObjectives', 'TEXT'],
+    ['keyConcepts', 'TEXT'],
+    ['suggestedTeachingMethod', 'TEXT'],
+    ['commonLearnerDifficulties', 'TEXT'],
+    ['assessmentQuestions', 'TEXT'],
+    ['markingGuide', 'TEXT'],
+    ['downloadUrl', 'TEXT'],
+    ['status', "TEXT NOT NULL DEFAULT 'ACTIVE'"],
+    ['qualityStatus', "TEXT NOT NULL DEFAULT 'DRAFT'"],
+    ['createdAt', 'TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+    ['updatedAt', 'TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP'],
+  ];
+  for (const [name, definition] of teacherColumns) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "TeacherMaterial" ADD COLUMN IF NOT EXISTS "${name}" ${definition}`);
+  }
+
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_subjectId_idx" ON "ContentMaterial"("subjectId")',
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_topicId_idx" ON "ContentMaterial"("topicId")',
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_contentType_idx" ON "ContentMaterial"("contentType")',
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_audience_idx" ON "ContentMaterial"("audience")',
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_accessLevel_idx" ON "ContentMaterial"("accessLevel")',
+    'CREATE INDEX IF NOT EXISTS "ContentMaterial_status_idx" ON "ContentMaterial"("status")',
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterial_materialType_idx" ON "TeacherMaterial"("materialType")',
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterial_status_idx" ON "TeacherMaterial"("status")',
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterial_subject_idx" ON "TeacherMaterial"("subject")',
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterial_grade_idx" ON "TeacherMaterial"("grade")',
+  ];
+  for (const statement of indexes) {
+    await prisma.$executeRawUnsafe(statement);
+  }
+}
+
 router.get('/supported-subjects', (_req, res) => {
   return res.json({
     subjects: SUPPORTED_KEY_SUBJECTS,
@@ -209,6 +325,17 @@ router.post('/admin/publish-active-existing', requireAdmin, async (req, res) => 
   } catch (error) {
     console.error('POST /api/content-materials/admin/publish-active-existing error:', error);
     return res.status(500).json({ message: 'Failed to publish active content materials' });
+  }
+});
+
+router.post('/admin/repair-schema', requireAdmin, async (req, res) => {
+  try {
+    await ensureContentMaterialSchema();
+    logAdminAction(req, 'content_material_schema_repaired', {});
+    return res.json({ message: 'Content material schema repair completed' });
+  } catch (error) {
+    console.error('POST /api/content-materials/admin/repair-schema error:', error);
+    return res.status(500).json({ message: 'Failed to repair content material schema', detail: error.message });
   }
 });
 

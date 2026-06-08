@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const { spawnSync } = require('child_process');
 require('dotenv').config();
 
 const env = require('./src/config/env');
@@ -21,6 +22,23 @@ const teachersRoutes = require('./src/routes/teachers.routes');
 const subscriptionsRoutes = require('./src/routes/subscriptions.routes');
 const teacherMaterialsRoutes = require('./src/routes/teacherMaterials.routes');
 const contentMaterialsRoutes = require('./src/routes/contentMaterials.routes');
+
+function syncPrismaSchemaOnBoot() {
+  if (env.NODE_ENV !== 'production' || process.env.SKIP_PRISMA_BOOT_SYNC === 'true') return;
+
+  const executable = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const result = spawnSync(executable, ['prisma', 'db', 'push', '--accept-data-loss'], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  if (result.status !== 0) {
+    console.error('Prisma boot schema sync failed; continuing startup.');
+  }
+}
+
+syncPrismaSchemaOnBoot();
 
 const app = express();
 const allowedOrigins = new Set(env.FRONTEND_URLS);
@@ -45,7 +63,7 @@ app.get('/', (_req, res) => {
     success: true,
     message: 'ZedExam Pro API running',
     environment: env.NODE_ENV,
-    version: 'launch-hardened',
+    version: 'launch-hardened-schema-sync',
   });
 });
 

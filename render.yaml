@@ -5,7 +5,7 @@ services:
     plan: free
     rootDir: backend
     buildCommand: npm ci && npm run prisma:generate
-    startCommand: npm run deploy:start
+    startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

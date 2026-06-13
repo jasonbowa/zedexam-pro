@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { getPaymentInstructions } = require('./payment');
+const { ensureStudentSubscriptionSchema } = require('./studentSubscriptions');
 
 const FREE_ACCESS = new Set(['', 'FREE', 'ALL', 'NONE']);
 
@@ -15,6 +16,7 @@ function getExpiredStatus(subscription) {
 
 async function getLatestStudentSubscription(studentId) {
   if (!studentId) return null;
+  await ensureStudentSubscriptionSchema();
   return prisma.studentSubscription.findFirst({
     where: { studentId: Number(studentId) },
     orderBy: [{ createdAt: 'desc' }],

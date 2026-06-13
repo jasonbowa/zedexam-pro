@@ -7,6 +7,7 @@ const { createRateLimiter } = require('../middleware/rateLimit');
 const { logAdminAction } = require('../utils/audit');
 const { getPaymentInstructions } = require('../utils/payment');
 const { buildStudentAccessPayload } = require('../utils/accessControl');
+const { ensureStudentSubscriptionSchema } = require('../utils/studentSubscriptions');
 
 const writeLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 50, keyPrefix: 'subscription-write' });
 const SUBSCRIPTION_STATUSES = ['ACTIVE', 'PENDING', 'EXPIRED', 'INACTIVE', 'CANCELLED'];
@@ -281,6 +282,7 @@ router.get('/my-plan', requireAuth, async (req, res) => {
       return res.json({ subscription: null, note: 'Admins do not have learner subscription plans' });
     }
 
+    await ensureStudentSubscriptionSchema();
     const subscription = await prisma.studentSubscription.findFirst({
       where: { studentId: req.user.id },
       orderBy: [{ createdAt: 'desc' }],

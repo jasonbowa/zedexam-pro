@@ -21,6 +21,7 @@ const {
 } = require('../utils/security');
 const { appendAuditLog } = require('../utils/audit');
 const { getPaymentInstructions } = require('../utils/payment');
+const { ensureStudentSubscriptionSchema } = require('../utils/studentSubscriptions');
 
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' });
 const registerLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'auth-register' });
@@ -268,6 +269,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       return res.status(409).json({ message: 'This student record already exists in the system and was previously removed. Restore it from admin instead of registering again.' });
     }
 
+    await ensureStudentSubscriptionSchema();
     const { student, subscription } = await prisma.$transaction(async (tx) => {
       const createdStudent = await tx.student.create({
         data: {

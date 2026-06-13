@@ -235,7 +235,12 @@ model ContentMaterial {
   audience               String   @default("STUDENT")
   accessLevel            String?
   content                String?
+  learningObjectives     String?
+  keyConcepts            String?
+  workedExamples         String?
+  summary                String?
   imageUrl               String?
+  diagramCaption         String?
   pdfUrl                 String?
   teacherGuidePdfUrl     String?
   commonMistakes         String?

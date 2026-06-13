@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/lib/apiBase.test.js"
+    "test": "node --test src/lib/apiBase.test.js src/lib/noteSections.test.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

@@ -16,7 +16,12 @@ const blankMaterial = {
   audience: 'STUDENT',
   accessLevel: 'FREE',
   content: '',
+  learningObjectives: '',
+  keyConcepts: '',
+  workedExamples: '',
+  summary: '',
   imageUrl: '',
+  diagramCaption: '',
   pdfUrl: '',
   teacherGuidePdfUrl: '',
   commonMistakes: '',
@@ -195,7 +200,12 @@ export default function ContentMaterialsAdmin() {
       audience: item.audience || 'STUDENT',
       accessLevel: item.accessLevel || 'FREE',
       content: item.content || '',
+      learningObjectives: item.learningObjectives || '',
+      keyConcepts: item.keyConcepts || '',
+      workedExamples: item.workedExamples || '',
+      summary: item.summary || '',
       imageUrl: item.imageUrl || '',
+      diagramCaption: item.diagramCaption || '',
       pdfUrl: item.pdfUrl || '',
       teacherGuidePdfUrl: item.teacherGuidePdfUrl || '',
       commonMistakes: item.commonMistakes || '',
@@ -318,7 +328,13 @@ export default function ContentMaterialsAdmin() {
             {subjectGuidance ? <Notice tone="info">{subjectGuidance}</Notice> : null}
 
             <FormInput label="Access Level / Package" value={form.accessLevel} onChange={(event) => updateField('accessLevel', event.target.value)} placeholder="FREE, PAID, ACTIVE_PACKAGE, or exact package name" />
-            <FormTextarea label="Online Note / Material Content" value={form.content} onChange={(event) => updateField('content', event.target.value)} rows={8} placeholder="Use clear explanations, examples, and exam-standard wording. Markdown-style line breaks are supported." />
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormTextarea label="Learning Objectives" value={form.learningObjectives} onChange={(event) => updateField('learningObjectives', event.target.value)} placeholder="- Define the main idea&#10;- Apply it to an exam-style problem" />
+              <FormTextarea label="Key Concepts / Terms" value={form.keyConcepts} onChange={(event) => updateField('keyConcepts', event.target.value)} placeholder="- Key term: short meaning&#10;- Formula or principle" />
+            </div>
+            <FormTextarea label="Main Explanation" value={form.content} onChange={(event) => updateField('content', event.target.value)} rows={8} placeholder="Write the main explanation only. Keep objectives, examples, and summary in their separate fields below." />
+            <FormTextarea label="Worked Examples" value={form.workedExamples} onChange={(event) => updateField('workedExamples', event.target.value)} rows={5} placeholder="Use numbered, step-by-step examples where appropriate." />
+            <FormTextarea label="Revision Summary" value={form.summary} onChange={(event) => updateField('summary', event.target.value)} placeholder="Short recap of the most important points." />
 
             {form.content ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -335,6 +351,7 @@ export default function ContentMaterialsAdmin() {
                 <p className="text-xs text-slate-500">{uploading === 'imageUrl' ? 'Uploading image...' : 'Use diagrams where educationally useful, not automatically for every subject.'}</p>
               </div>
             </div>
+            <FormInput label="Diagram Caption" value={form.diagramCaption} onChange={(event) => updateField('diagramCaption', event.target.value)} placeholder="Explain what the learner should notice in the diagram." />
 
             <div className="grid gap-4 md:grid-cols-2">
               <FormInput label="Student PDF Note URL" value={form.pdfUrl} onChange={(event) => updateField('pdfUrl', event.target.value)} placeholder="/uploads/note.pdf or https://..." />

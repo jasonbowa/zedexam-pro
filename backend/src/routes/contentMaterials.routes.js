@@ -276,6 +276,28 @@ router.get('/supported-subjects', (_req, res) => {
   });
 });
 
+router.get('/health', async (_req, res) => {
+  try {
+    const [contentMaterials, teacherMaterials] = await Promise.all([
+      prisma.contentMaterial.findMany({
+        take: 1,
+        include: { subject: true, topic: true },
+      }),
+      prisma.teacherMaterial.findMany({ take: 1 }),
+    ]);
+
+    return res.json({
+      success: true,
+      status: 'ok',
+      contentMaterialQueryReady: Array.isArray(contentMaterials),
+      teacherMaterialQueryReady: Array.isArray(teacherMaterials),
+    });
+  } catch (error) {
+    console.error('GET /api/content-materials/health error:', error);
+    return res.status(500).json({ message: 'Content materials health check failed' });
+  }
+});
+
 router.post('/admin/upload', requireAdmin, materialUpload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'File is required' });
   const fileUrl = `/uploads/${req.file.filename}`;

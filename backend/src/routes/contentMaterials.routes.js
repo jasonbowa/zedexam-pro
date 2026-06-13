@@ -13,6 +13,7 @@ const {
   getLatestStudentSubscription,
   buildStudentAccessPayload,
 } = require('../utils/accessControl');
+const { ensureStudentSubscriptionSchema } = require('../utils/studentSubscriptions');
 
 const CONTENT_TYPES = ['NOTE', 'PDF_NOTE', 'TEACHER_NOTE', 'TEACHER_GUIDE', 'DOWNLOAD', 'PRACTICE', 'MOCK_SUPPORT'];
 const AUDIENCES = ['STUDENT', 'TEACHER', 'BOTH'];
@@ -278,12 +279,17 @@ router.get('/supported-subjects', (_req, res) => {
 
 router.get('/health', async (_req, res) => {
   try {
-    const [contentMaterials, teacherMaterials] = await Promise.all([
+    await ensureStudentSubscriptionSchema();
+    const [contentMaterials, teacherMaterials, studentSubscription] = await Promise.all([
       prisma.contentMaterial.findMany({
         take: 1,
         include: { subject: true, topic: true },
       }),
       prisma.teacherMaterial.findMany({ take: 1 }),
+      prisma.studentSubscription.findFirst({
+        orderBy: [{ createdAt: 'desc' }],
+        include: { package: true, school: true },
+      }),
     ]);
 
     return res.json({
@@ -291,6 +297,7 @@ router.get('/health', async (_req, res) => {
       status: 'ok',
       contentMaterialQueryReady: Array.isArray(contentMaterials),
       teacherMaterialQueryReady: Array.isArray(teacherMaterials),
+      studentSubscriptionQueryReady: studentSubscription === null || Boolean(studentSubscription.id),
     });
   } catch (error) {
     console.error('GET /api/content-materials/health error:', error);

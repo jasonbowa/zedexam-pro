@@ -1,13 +1,11 @@
 import axios from 'axios';
 import { getAuthToken } from './auth';
+import { resolveApiRoot } from './apiBase';
 
-const resolveApiBaseUrl = () => {
-  const raw = String(import.meta.env.VITE_API_URL || '').trim();
-  if (!raw) return 'https://zedexam.onrender.com';
-  return raw.replace(/\/api\/?$/, '').replace(/\/+$/, '');
-};
-
-export const API_BASE_URL = resolveApiBaseUrl();
+export const API_BASE_URL = resolveApiRoot({
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL,
+  apiUrl: import.meta.env.VITE_API_URL,
+});
 export const API = `${API_BASE_URL}/api`;
 
 export const api = axios.create({

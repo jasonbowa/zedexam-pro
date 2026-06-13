@@ -1,20 +1,13 @@
 import { clearStoredUsers, getAuthToken, getStoredUser as getStoredUserFromLib, saveUser } from "./lib/auth";
+import { resolveApiBase, resolveApiRoot } from "./lib/apiBase";
 
-const resolveApiBase = () => {
-  const envBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
-  const envRoot = String(import.meta.env.VITE_API_URL || "").trim();
-  const raw = envBase || envRoot;
-
-  if (!raw) {
-    return "https://zedexam.onrender.com/api";
-  }
-
-  const cleaned = raw.replace(/\/+$/, "");
-  return cleaned.endsWith("/api") ? cleaned : `${cleaned}/api`;
+const apiEnvironment = {
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL,
+  apiUrl: import.meta.env.VITE_API_URL,
 };
 
-export const API_BASE = resolveApiBase();
-export const API_ROOT = API_BASE.replace(/\/api$/, "");
+export const API_BASE = resolveApiBase(apiEnvironment);
+export const API_ROOT = resolveApiRoot(apiEnvironment);
 
 const normalizeTopicShape = (value) => {
   if (Array.isArray(value)) {

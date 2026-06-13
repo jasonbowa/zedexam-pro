@@ -30,22 +30,62 @@ function quoteIdentifier(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
-async function getTeacherMaterialUserColumns() {
+async function getTeacherMaterialUserSchema() {
   if (columnCache) return columnCache;
 
   const rows = await prisma.$queryRaw`
-    SELECT column_name
+    SELECT
+      column_name,
+      data_type,
+      udt_name,
+      is_nullable,
+      column_default,
+      is_identity,
+      character_maximum_length
     FROM information_schema.columns
     WHERE table_schema = current_schema()
       AND table_name = 'TeacherMaterialUser'
   `;
 
-  columnCache = new Set(rows.map((row) => row.column_name));
+  columnCache = new Map(rows.map((row) => [row.column_name, row]));
   return columnCache;
 }
 
 function selectColumns(columns) {
   return PUBLIC_COLUMNS.filter((column) => columns.has(column)).map(quoteIdentifier).join(', ');
+}
+
+function isNumericColumn(column) {
+  return ['smallint', 'integer', 'bigint'].includes(String(column?.data_type || '').toLowerCase());
+}
+
+function coerceColumnValue(column, value) {
+  if (value === undefined || value === null) return value;
+  if (isNumericColumn(column)) return Number(value);
+  return value;
+}
+
+function buildCompatibleId(column) {
+  if (!column) return undefined;
+  const hasDatabaseDefault = Boolean(column.column_default) || String(column.is_identity || '').toUpperCase() === 'YES';
+  if (isNumericColumn(column)) {
+    if (hasDatabaseDefault) return undefined;
+    throw new Error('TeacherMaterialUser numeric id column requires a database default');
+  }
+
+  if (String(column.udt_name || '').toLowerCase() === 'uuid') {
+    return crypto.randomUUID();
+  }
+
+  const generated = crypto.randomBytes(12).toString('hex');
+  const maximumLength = Number(column.character_maximum_length);
+  return Number.isFinite(maximumLength) && maximumLength > 0
+    ? generated.slice(0, maximumLength)
+    : generated;
+}
+
+function isPrismaSchemaCompatibilityError(error) {
+  return ['P2000', 'P2003', 'P2010', 'P2021', 'P2022', 'P2023'].includes(error?.code);
 }
 
 function normalizeTeacherMaterialUser(row, fallback = {}) {
@@ -75,13 +115,13 @@ function normalizeTeacherMaterialUser(row, fallback = {}) {
 }
 
 async function findTeacherMaterialUserByConditions(conditions = []) {
-  const columns = await getTeacherMaterialUserColumns();
+  const columns = await getTeacherMaterialUserSchema();
   const selectable = selectColumns(columns);
   const filtered = conditions.filter(({ column, value }) => columns.has(column) && value !== undefined && value !== null && value !== '');
 
   if (!selectable || !filtered.length) return null;
 
-  const values = filtered.map(({ value }) => value);
+  const values = filtered.map(({ column, value }) => coerceColumnValue(columns.get(column), value));
   const where = filtered.map(({ column }, index) => `${quoteIdentifier(column)} = $${index + 1}`).join(' OR ');
   const rows = await prisma.$queryRawUnsafe(
     `SELECT ${selectable} FROM ${quoteIdentifier(TABLE_NAME)} WHERE ${where} LIMIT 1`,
@@ -102,14 +142,16 @@ async function findTeacherMaterialUserByContact({ phone, email }) {
   ]);
 }
 
-async function createTeacherMaterialUser(data) {
-  const columns = await getTeacherMaterialUserColumns();
+async function createTeacherMaterialUserWithLegacySchema(data) {
+  const columns = await getTeacherMaterialUserSchema();
   const now = new Date();
-  const id = crypto.randomUUID();
+  const id = buildCompatibleId(columns.get('id'));
   const candidates = [
     ['id', id],
     ['name', data.name],
+    ['fullName', data.name],
     ['phone', data.phone],
+    ['phoneNumber', data.phone],
     ['email', data.email || null],
     ['password', data.password],
     ['packageId', data.packageId || null],
@@ -127,7 +169,7 @@ async function createTeacherMaterialUser(data) {
   }
 
   const insertColumns = candidates.map(([column]) => column);
-  const values = candidates.map(([, value]) => value);
+  const values = candidates.map(([column, value]) => coerceColumnValue(columns.get(column), value));
   const placeholders = insertColumns.map((_, index) => `$${index + 1}`);
   const returning = selectColumns(columns);
   const rows = await prisma.$queryRawUnsafe(
@@ -140,8 +182,31 @@ async function createTeacherMaterialUser(data) {
   return normalizeTeacherMaterialUser(rows[0], { package: data.package });
 }
 
+async function createTeacherMaterialUser(data) {
+  try {
+    const user = await prisma.teacherMaterialUser.create({
+      data: {
+        name: data.name,
+        phone: data.phone,
+        email: data.email || null,
+        password: data.password,
+        packageId: data.packageId || null,
+        package: data.package || null,
+        status: data.status || 'PENDING',
+        proofStatus: data.proofStatus || 'PENDING',
+        isActive: data.isActive === true,
+      },
+    });
+    return normalizeTeacherMaterialUser(user, { package: data.package });
+  } catch (error) {
+    if (!isPrismaSchemaCompatibilityError(error)) throw error;
+    console.warn('TeacherMaterialUser Prisma create fell back to legacy schema support:', error.code);
+    return createTeacherMaterialUserWithLegacySchema(data);
+  }
+}
+
 async function updateTeacherMaterialUser(id, data) {
-  const columns = await getTeacherMaterialUserColumns();
+  const columns = await getTeacherMaterialUserSchema();
   const entries = Object.entries(data)
     .filter(([column, value]) => columns.has(column) && value !== undefined);
 
@@ -149,8 +214,8 @@ async function updateTeacherMaterialUser(id, data) {
     return findTeacherMaterialUserById(id);
   }
 
-  const values = entries.map(([, value]) => value);
-  values.push(String(id));
+  const values = entries.map(([column, value]) => coerceColumnValue(columns.get(column), value));
+  values.push(coerceColumnValue(columns.get('id'), id));
   const setClause = entries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`).join(', ');
   const returning = selectColumns(columns);
   const rows = await prisma.$queryRawUnsafe(

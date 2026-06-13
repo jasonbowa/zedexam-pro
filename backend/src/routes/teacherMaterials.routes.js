@@ -178,6 +178,9 @@ router.post('/register', registerLimiter, async (req, res) => {
     });
   } catch (error) {
     console.error('POST /api/teacher-materials/register error:', error);
+    if (error?.code === 'P2002' || error?.code === '23505') {
+      return res.status(409).json({ message: 'A Teacher Materials account with this phone number or email already exists' });
+    }
     return res.status(500).json({ message: 'Failed to register Teacher Materials account' });
   }
 });

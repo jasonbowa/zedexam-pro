@@ -84,10 +84,6 @@ function buildCompatibleId(column) {
     : generated;
 }
 
-function isPrismaSchemaCompatibilityError(error) {
-  return ['P2000', 'P2003', 'P2010', 'P2021', 'P2022', 'P2023'].includes(error?.code);
-}
-
 function normalizeTeacherMaterialUser(row, fallback = {}) {
   if (!row) return null;
 
@@ -199,8 +195,8 @@ async function createTeacherMaterialUser(data) {
     });
     return normalizeTeacherMaterialUser(user, { package: data.package });
   } catch (error) {
-    if (!isPrismaSchemaCompatibilityError(error)) throw error;
-    console.warn('TeacherMaterialUser Prisma create fell back to legacy schema support:', error.code);
+    if (error?.code === 'P2002' || error?.code === '23505') throw error;
+    console.warn('TeacherMaterialUser Prisma create fell back to legacy schema support:', error?.code || error?.name || 'unknown');
     return createTeacherMaterialUserWithLegacySchema(data);
   }
 }

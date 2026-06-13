@@ -73,6 +73,7 @@ app.get('/health', (_req, res) => {
     status: 'ok',
     environment: env.NODE_ENV,
     uploadsEnabled: true,
+    revision: String(process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || 'local').slice(0, 12),
   });
 });
 

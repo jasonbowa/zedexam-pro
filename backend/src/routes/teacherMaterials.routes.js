@@ -181,13 +181,6 @@ router.post('/register', registerLimiter, async (req, res) => {
     if (error?.code === 'P2002' || error?.code === '23505') {
       return res.status(409).json({ message: 'A Teacher Materials account with this phone number or email already exists' });
     }
-    if (req.headers['x-zedexam-registration-diagnostic'] === 'schema') {
-      return res.status(500).json({
-        message: 'Failed to register Teacher Materials account',
-        diagnosticCode: String(error?.code || error?.name || 'UNKNOWN').slice(0, 40),
-        diagnosticDetail: String(error?.message || 'No diagnostic message').replace(/\s+/g, ' ').slice(0, 400),
-      });
-    }
     return res.status(500).json({ message: 'Failed to register Teacher Materials account' });
   }
 });

@@ -25,13 +25,55 @@ const PUBLIC_COLUMNS = [
 ];
 
 let columnCache = null;
+let schemaReady = false;
 
 function quoteIdentifier(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
+async function ensureTeacherMaterialUserSchema() {
+  if (schemaReady) return;
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "TeacherMaterialUser" (
+      "id" TEXT PRIMARY KEY,
+      "name" TEXT NOT NULL,
+      "phone" TEXT NOT NULL UNIQUE,
+      "email" TEXT UNIQUE,
+      "password" TEXT NOT NULL,
+      "packageId" INTEGER,
+      "package" TEXT,
+      "paymentReference" TEXT,
+      "amountPaid" DECIMAL(10, 2),
+      "proofStatus" TEXT NOT NULL DEFAULT 'PENDING',
+      "confirmedBy" TEXT,
+      "confirmedAt" TIMESTAMP(3),
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "isActive" BOOLEAN NOT NULL DEFAULT false,
+      "activatedAt" TIMESTAMP(3),
+      "expiresAt" TIMESTAMP(3),
+      "lastLoginAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterialUser_status_idx" ON "TeacherMaterialUser"("status")'
+  );
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterialUser_isActive_idx" ON "TeacherMaterialUser"("isActive")'
+  );
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "TeacherMaterialUser_packageId_idx" ON "TeacherMaterialUser"("packageId")'
+  );
+
+  schemaReady = true;
+}
+
 async function getTeacherMaterialUserSchema() {
   if (columnCache) return columnCache;
+  await ensureTeacherMaterialUserSchema();
 
   const rows = await prisma.$queryRaw`
     SELECT
@@ -227,6 +269,7 @@ async function updateTeacherMaterialUser(id, data) {
 
 module.exports = {
   createTeacherMaterialUser,
+  ensureTeacherMaterialUserSchema,
   findTeacherMaterialUserByContact,
   findTeacherMaterialUserById,
   updateTeacherMaterialUser,

@@ -282,6 +282,7 @@ router.get('/health', async (_req, res) => {
     await ensureStudentSubscriptionSchema();
     const [contentMaterials, teacherMaterials, studentSubscription] = await Promise.all([
       prisma.contentMaterial.findMany({
+        where: buildWhereFromQuery({}, 'STUDENT'),
         take: 1,
         include: { subject: true, topic: true },
       }),
@@ -296,6 +297,7 @@ router.get('/health', async (_req, res) => {
       success: true,
       status: 'ok',
       contentMaterialQueryReady: Array.isArray(contentMaterials),
+      publishedStudentMaterialsAvailable: contentMaterials.length > 0,
       teacherMaterialQueryReady: Array.isArray(teacherMaterials),
       studentSubscriptionQueryReady: studentSubscription === null || Boolean(studentSubscription.id),
     });

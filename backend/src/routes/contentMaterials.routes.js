@@ -18,6 +18,7 @@ const CONTENT_TYPES = ['NOTE', 'PDF_NOTE', 'TEACHER_NOTE', 'TEACHER_GUIDE', 'DOW
 const AUDIENCES = ['STUDENT', 'TEACHER', 'BOTH'];
 const STATUSES = ['ACTIVE', 'DRAFT', 'INACTIVE'];
 const QUALITY_STATUSES = ['DRAFT', 'NEEDS_REVIEW', 'APPROVED', 'PUBLISHED'];
+let schemaReadyPromise = null;
 
 function normalizeEnum(value, allowed, fallback) {
   const candidate = String(value || fallback || '').trim().toUpperCase().replace(/[\s-]+/g, '_');
@@ -244,6 +245,28 @@ async function ensureContentMaterialSchema() {
     await prisma.$executeRawUnsafe(statement);
   }
 }
+
+function ensureContentMaterialSchemaReady() {
+  if (!schemaReadyPromise) {
+    schemaReadyPromise = ensureContentMaterialSchema().catch((error) => {
+      schemaReadyPromise = null;
+      throw error;
+    });
+  }
+  return schemaReadyPromise;
+}
+
+router.use(async (req, res, next) => {
+  if (req.path === '/supported-subjects') return next();
+
+  try {
+    await ensureContentMaterialSchemaReady();
+    return next();
+  } catch (error) {
+    console.error('Content material schema initialization error:', error);
+    return res.status(500).json({ message: 'Failed to initialize content materials' });
+  }
+});
 
 router.get('/supported-subjects', (_req, res) => {
   return res.json({

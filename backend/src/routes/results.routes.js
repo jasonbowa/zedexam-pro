@@ -72,7 +72,15 @@ function isAutoScorable(question) {
 }
 
 function resolveCorrectAnswer(question) {
-  return question.correctAnswer || question.answerText || '';
+  const answer = question.correctAnswer || question.answerText || '';
+  const answerKey = String(answer).trim().toUpperCase();
+  const optionMap = {
+    A: question.optionA,
+    B: question.optionB,
+    C: question.optionC,
+    D: question.optionD,
+  };
+  return optionMap[answerKey] || answer;
 }
 
 function scoreAttempt(questions, answers) {

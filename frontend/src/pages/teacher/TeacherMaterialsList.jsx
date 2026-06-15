@@ -8,17 +8,17 @@ import MarkdownText from '../../components/MarkdownText';
 const configByType = {
   notes: {
     title: 'Teacher Notes',
-    endpoint: '/content-materials/teacher?contentType=TEACHER_NOTE',
+    endpoint: '/teacher-materials/notes',
     subtitle: 'Browse teaching notes structured by subject, grade/form, topic, objectives, and key concepts.',
   },
   guides: {
     title: 'Teacher Guides',
-    endpoint: '/content-materials/teacher?contentType=TEACHER_GUIDE',
+    endpoint: '/teacher-materials/guides',
     subtitle: 'Use teaching methods, learner-difficulty notes, assessment prompts, and marking guidance.',
   },
   downloads: {
     title: 'Downloads',
-    endpoint: '/content-materials/teacher?contentType=DOWNLOAD',
+    endpoint: '/teacher-materials/downloads',
     subtitle: 'Access downloadable links and PDF support materials where available.',
   },
 };
@@ -120,6 +120,9 @@ export default function TeacherMaterialsList({ type = 'notes' }) {
                   ) : null}
                   {item.teacherGuidePdfUrl ? (
                     <a className="btn btn-secondary" href={resolveAssetUrl(item.teacherGuidePdfUrl)} target="_blank" rel="noreferrer">Download Teacher Guide</a>
+                  ) : null}
+                  {item.downloadUrl ? (
+                    <a className="btn btn-secondary" href={resolveAssetUrl(item.downloadUrl)} target="_blank" rel="noreferrer">Open Download</a>
                   ) : null}
                 </div>
 

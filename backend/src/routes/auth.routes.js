@@ -22,6 +22,7 @@ const {
 const { appendAuditLog } = require('../utils/audit');
 const { getPaymentInstructions } = require('../utils/payment');
 const { ensureStudentSubscriptionSchema } = require('../utils/studentSubscriptions');
+const { getStudentPackageWhere } = require('../utils/packageAudience');
 
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'auth-login' });
 const registerLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'auth-register' });
@@ -240,11 +241,11 @@ router.post('/register', registerLimiter, async (req, res) => {
     let selectedPlan = null;
     if (parsedPackageId && !Number.isNaN(parsedPackageId)) {
       selectedPlan = await prisma.subscriptionPackage.findFirst({
-        where: { id: parsedPackageId, active: true },
+        where: getStudentPackageWhere({ id: parsedPackageId, active: true }),
       });
     } else if (requestedPackageName) {
       selectedPlan = await prisma.subscriptionPackage.findFirst({
-        where: { name: requestedPackageName, active: true },
+        where: getStudentPackageWhere({ name: requestedPackageName, active: true }),
       });
     }
 

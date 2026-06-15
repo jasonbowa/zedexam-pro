@@ -55,6 +55,18 @@ function normalizeBulkRow(q = {}) {
     marks: Number(q.marks) > 0 ? Number(q.marks) : 1,
   };
 
+  if (['MCQ', 'PASSAGE_BASED', 'IMAGE_BASED'].includes(questionType)) {
+    const optionMap = {
+      A: row.optionA,
+      B: row.optionB,
+      C: row.optionC,
+      D: row.optionD,
+    };
+    const answerKey = String(row.correctAnswer || '').trim().toUpperCase();
+    row.correctAnswer = optionMap[answerKey] || row.correctAnswer;
+    row.answerText = null;
+  }
+
   const errors = [];
   if (!row.question) errors.push('question missing');
   if (['MCQ', 'PASSAGE_BASED', 'IMAGE_BASED'].includes(questionType)) {
@@ -66,6 +78,9 @@ function normalizeBulkRow(q = {}) {
   }
   if (questionType === 'PASSAGE_BASED' && !row.passage) errors.push('passage missing');
   if (questionType === 'IMAGE_BASED' && !row.imageUrl) errors.push('imageUrl missing');
+  if (row.imageUrl && !/^https?:\/\/|^\/uploads\//i.test(row.imageUrl)) {
+    errors.push('imageUrl must be a full URL or a /uploads/ path');
+  }
   return { row, errors };
 }
 

@@ -111,30 +111,43 @@ export default function BulkUpload() {
     setUploading(true);
 
     try {
-      let uploadedCount = 0;
+      const questions = parsed.map((item) => ({
+        questionType: "MCQ",
+        question: item.question,
+        optionA: item.optionA,
+        optionB: item.optionB,
+        optionC: item.optionC,
+        optionD: item.optionD,
+        correctAnswer: item.correctAnswer,
+        explanation: item.explanation || "",
+        imageUrl: item.image || "",
+      }));
 
-      for (const item of parsed) {
-        const payload = {
-          topicId: Number(topicId),
-          question: item.question,
-          optionA: item.optionA,
-          optionB: item.optionB,
-          optionC: item.optionC,
-          optionD: item.optionD,
-          correctAnswer: item.correctAnswer,
-          explanation: item.explanation || "",
-          image: item.image || "",
-        };
+      const preview = await authFetch("/admin/questions/bulk-preview", {
+        method: "POST",
+        body: JSON.stringify({ questions }),
+      });
+      const invalidRows = Array.isArray(preview?.preview)
+        ? preview.preview.filter((row) => !row.valid)
+        : [];
 
-        await authFetch("/questions", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-
-        uploadedCount += 1;
+      if (invalidRows.length) {
+        const details = invalidRows
+          .slice(0, 5)
+          .map((row) => `Row ${row.rowNumber}: ${row.errors.join(", ")}`)
+          .join("; ");
+        throw new Error(`Please fix ${invalidRows.length} invalid question(s). ${details}`);
       }
 
-      setSuccess(`${uploadedCount} questions uploaded successfully.`);
+      const result = await authFetch("/admin/questions/bulk-upload", {
+        method: "POST",
+        body: JSON.stringify({
+          topicId: Number(topicId),
+          questions,
+        }),
+      });
+
+      setSuccess(result?.message || `${questions.length} questions uploaded successfully.`);
       setBulkText("");
       setParsedPreview([]);
     } catch (err) {

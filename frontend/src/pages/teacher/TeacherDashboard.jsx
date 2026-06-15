@@ -6,8 +6,8 @@ import { authFetch, getStoredUser } from '../../api';
 import { EmptyState, LoadingState, Notice, SectionCard, StatCard } from '../../components/ui';
 
 const typeLabels = {
-  TEACHER_NOTE: 'Teacher Notes',
-  TEACHER_GUIDE: 'Teacher Guides',
+  NOTE: 'Teacher Notes',
+  GUIDE: 'Teacher Guides',
   DOWNLOAD: 'Downloads',
 };
 
@@ -35,7 +35,7 @@ export default function TeacherDashboard() {
         setAccess(me.access || null);
 
         if (isActiveAccess(me.access)) {
-          const data = await authFetch('/content-materials/teacher');
+          const data = await authFetch('/teacher-materials/materials');
           setMaterials(Array.isArray(data) ? data : []);
         } else {
           setMaterials([]);
@@ -51,7 +51,8 @@ export default function TeacherDashboard() {
 
   const counts = useMemo(() => {
     return materials.reduce((acc, item) => {
-      acc[item.contentType] = (acc[item.contentType] || 0) + 1;
+      const type = item.materialType || item.contentType;
+      acc[type] = (acc[type] || 0) + 1;
       return acc;
     }, {});
   }, [materials]);
@@ -91,8 +92,8 @@ export default function TeacherDashboard() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Access Status" value={loading ? '...' : status} hint={active ? 'Materials unlocked' : 'Payment confirmation required'} accent={active ? 'emerald' : 'amber'} />
-        <StatCard label="Teacher Notes" value={loading ? '...' : counts.TEACHER_NOTE || 0} hint="Structured lesson support" accent="slate" />
-        <StatCard label="Teacher Guides" value={loading ? '...' : counts.TEACHER_GUIDE || 0} hint="Teaching method support" accent="blue" />
+        <StatCard label="Teacher Notes" value={loading ? '...' : counts.NOTE || 0} hint="Structured lesson support" accent="slate" />
+        <StatCard label="Teacher Guides" value={loading ? '...' : counts.GUIDE || 0} hint="Teaching method support" accent="blue" />
         <StatCard label="Downloads" value={loading ? '...' : counts.DOWNLOAD || 0} hint="PDF links where available" accent="white" />
       </div>
 
@@ -125,10 +126,10 @@ export default function TeacherDashboard() {
           <div className="grid gap-4 xl:grid-cols-2">
             {materials.slice(0, 6).map((item) => (
               <div key={item.id} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
-                <span className="badge badge-info">{typeLabels[item.contentType] || item.contentType}</span>
+                <span className="badge badge-info">{typeLabels[item.materialType || item.contentType] || item.materialType || item.contentType}</span>
                 <h3 className="mt-3 text-lg font-bold text-slate-950">{item.title}</h3>
                 <p className="mt-1 text-sm text-slate-500">{[item.subject, item.grade, item.topic].filter(Boolean).join(' / ') || 'General resource'}</p>
-                <p className="mt-3 text-sm leading-6 text-slate-600">{item.content || item.examStyleGuidance || 'Structured teacher material ready for classroom support.'}</p>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{item.summary || item.content || item.examStyleGuidance || 'Structured teacher material ready for classroom support.'}</p>
               </div>
             ))}
           </div>

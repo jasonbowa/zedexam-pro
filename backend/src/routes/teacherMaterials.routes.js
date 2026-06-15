@@ -25,6 +25,9 @@ const {
   findTeacherMaterialUserByContact,
   updateTeacherMaterialUser,
 } = require('../utils/teacherMaterialUsers');
+const {
+  getTeacherPackageWhere,
+} = require('../utils/packageAudience');
 
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10, keyPrefix: 'teacher-materials-login' });
 const registerLimiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 8, keyPrefix: 'teacher-materials-register' });
@@ -100,7 +103,7 @@ async function findTeacherMaterialUserByIdentifier(rawIdentifier) {
 router.get('/packages', async (_req, res) => {
   try {
     const packages = await prisma.subscriptionPackage.findMany({
-      where: { active: true },
+      where: getTeacherPackageWhere({ active: true }),
       orderBy: [{ priceZmw: 'asc' }],
       select: { id: true, name: true, description: true, priceZmw: true, durationDays: true },
     });
@@ -140,13 +143,21 @@ router.post('/register', registerLimiter, async (req, res) => {
 
     const parsedPackageId = Number(packageId);
     if (parsedPackageId && !Number.isNaN(parsedPackageId)) {
-      const plan = await prisma.subscriptionPackage.findFirst({ where: { id: parsedPackageId, active: true } });
+      const plan = await prisma.subscriptionPackage.findFirst({
+        where: getTeacherPackageWhere({ id: parsedPackageId, active: true }),
+      });
       if (!plan) return res.status(400).json({ message: 'Selected Teacher Materials package was not found' });
       packageName = plan.name;
       resolvedPackageId = plan.id;
     } else if (packageName) {
-      const plan = await prisma.subscriptionPackage.findFirst({ where: { name: packageName, active: true } });
+      const plan = await prisma.subscriptionPackage.findFirst({
+        where: getTeacherPackageWhere({ name: packageName, active: true }),
+      });
       if (plan) resolvedPackageId = plan.id;
+    }
+
+    if (!resolvedPackageId || !packageName) {
+      return res.status(400).json({ message: 'Please select a valid Teacher Materials package before creating the account' });
     }
 
     const existing = await findTeacherMaterialUserByContact({

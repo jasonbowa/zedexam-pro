@@ -130,7 +130,7 @@ export default function TeacherAuth({ mode = 'login' }) {
                 </label>
                 {packages.length ? (
                   <label className="grid gap-2 text-sm font-semibold text-slate-700">Selected Package
-                    <select className="input" value={form.selectedPackage} onChange={(event) => updateField('selectedPackage', event.target.value)}>
+                    <select className="input" required value={form.selectedPackage} onChange={(event) => updateField('selectedPackage', event.target.value)}>
                       <option value="">Select package</option>
                       {packages.map((pkg) => (
                         <option key={pkg.id} value={pkg.name}>{pkg.name} - K{Number(pkg.priceZmw || 0).toFixed(2)}</option>
@@ -139,7 +139,7 @@ export default function TeacherAuth({ mode = 'login' }) {
                   </label>
                 ) : (
                   <label className="grid gap-2 text-sm font-semibold text-slate-700">Selected Package
-                    <input className="input" value={form.selectedPackage} onChange={(event) => updateField('selectedPackage', event.target.value)} placeholder="e.g. Teacher Materials Monthly" />
+                    <input className="input" required value={form.selectedPackage} onChange={(event) => updateField('selectedPackage', event.target.value)} placeholder="e.g. Teacher Materials Monthly" />
                   </label>
                 )}
               </>

@@ -8,6 +8,11 @@ const { logAdminAction } = require('../utils/audit');
 const { getPaymentInstructions } = require('../utils/payment');
 const { buildStudentAccessPayload } = require('../utils/accessControl');
 const { ensureStudentSubscriptionSchema } = require('../utils/studentSubscriptions');
+const {
+  getStudentPackageWhere,
+  getTeacherPackageWhere,
+  isTeacherMaterialsPackage,
+} = require('../utils/packageAudience');
 
 const writeLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 50, keyPrefix: 'subscription-write' });
 const SUBSCRIPTION_STATUSES = ['ACTIVE', 'PENDING', 'EXPIRED', 'INACTIVE', 'CANCELLED'];
@@ -173,7 +178,7 @@ function getPackageEndDate(startDate, pkg) {
 router.get('/public-packages', async (_req, res) => {
   try {
     const packages = await prisma.subscriptionPackage.findMany({
-      where: { active: true },
+      where: getStudentPackageWhere({ active: true }),
       orderBy: [{ priceZmw: 'asc' }],
       select: {
         id: true,
@@ -194,9 +199,17 @@ router.get('/public-packages', async (_req, res) => {
   }
 });
 
-router.get('/packages', requireAuth, async (_req, res) => {
+router.get('/packages', requireAuth, async (req, res) => {
   try {
-    const packages = await prisma.subscriptionPackage.findMany({ orderBy: [{ priceZmw: 'asc' }] });
+    const where = req.user?.isAdmin
+      ? {}
+      : req.user?.role === 'teacher_materials'
+        ? getTeacherPackageWhere({ active: true })
+        : getStudentPackageWhere({ active: true });
+    const packages = await prisma.subscriptionPackage.findMany({
+      where,
+      orderBy: [{ priceZmw: 'asc' }],
+    });
     return res.json(packages);
   } catch (error) {
     console.error('GET /api/subscriptions/packages error:', error);
@@ -333,6 +346,9 @@ router.post('/assign', requireAdmin, writeLimiter, async (req, res) => {
 
     const pkg = await prisma.subscriptionPackage.findUnique({ where: { id: packageId } });
     if (!pkg) return res.status(404).json({ message: 'Package not found' });
+    if (isTeacherMaterialsPackage(pkg)) {
+      return res.status(400).json({ message: 'Teacher Materials packages cannot be assigned to student accounts' });
+    }
 
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + Number(pkg.durationDays || 30));

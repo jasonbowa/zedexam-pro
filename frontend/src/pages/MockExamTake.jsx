@@ -2,18 +2,29 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import PageShell from '../components/PageShell';
 import { EmptyState, LoadingState, Notice, SectionCard, StatCard } from '../components/ui';
-import { api, firstSuccessfulRequest } from '../lib/api';
+import { API_BASE_URL, api, firstSuccessfulRequest } from '../lib/api';
 
 function normalizeQuestion(question, index) {
   return {
     id: question.id ?? `${index + 1}`,
+    questionType: question.questionType || question.type || 'MCQ',
     question: question.question || question.text || `Question ${index + 1}`,
+    passage: question.passage || '',
+    imageUrl: question.imageUrl || '',
     optionA: question.optionA || question.a || question.options?.A || question.options?.[0] || '',
     optionB: question.optionB || question.b || question.options?.B || question.options?.[1] || '',
     optionC: question.optionC || question.c || question.options?.C || question.options?.[2] || '',
     optionD: question.optionD || question.d || question.options?.D || question.options?.[3] || '',
     marks: Number(question.marks || 1),
   };
+}
+
+function resolveImageUrl(imageUrl) {
+  if (!imageUrl) return '';
+  if (/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  if (imageUrl.startsWith('/content/')) return imageUrl;
+  if (imageUrl.startsWith('/')) return `${API_BASE_URL}${imageUrl}`;
+  return imageUrl;
 }
 
 export default function MockExamTake() {
@@ -137,11 +148,20 @@ export default function MockExamTake() {
           <div className="space-y-6">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-6">
               <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-600">Question {currentIndex + 1}</p>
+              {currentQuestion.passage ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{currentQuestion.passage}</p> : null}
               <h3 className="mt-3 text-xl font-bold leading-8 text-slate-950">{currentQuestion.question}</h3>
+              {currentQuestion.imageUrl ? (
+                <img
+                  src={resolveImageUrl(currentQuestion.imageUrl)}
+                  alt="Question diagram"
+                  className="mt-4 max-h-[360px] w-full rounded-2xl border border-slate-200 bg-white object-contain"
+                />
+              ) : null}
             </div>
 
-            <div className="grid gap-3">
-              {options.map(([label, value]) => {
+            {options.length ? (
+              <div className="grid gap-3">
+                {options.map(([label, value]) => {
                 const selected = answers[currentQuestion.id] === value;
                 return (
                   <label
@@ -163,8 +183,19 @@ export default function MockExamTake() {
                     </div>
                   </label>
                 );
-              })}
-            </div>
+                })}
+              </div>
+            ) : (
+              <label className="grid gap-2 text-sm font-semibold text-slate-700">
+                Your answer
+                <textarea
+                  className="input min-h-[180px]"
+                  value={answers[currentQuestion.id] || ''}
+                  onChange={(event) => setAnswers((prev) => ({ ...prev, [currentQuestion.id]: event.target.value }))}
+                  placeholder="Type your answer here. Structured English responses may need teacher or self marking after practice."
+                />
+              </label>
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <button onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))} disabled={currentIndex === 0} className="btn btn-secondary disabled:opacity-50">Previous</button>
